@@ -8968,11 +8968,20 @@ function Habilitations() {
               {selTech.email && <div style={{ fontSize:12, color:"#94a3b8", marginBottom:12 }}>✉ {selTech.email}</div>}
               {!selTech.telephone && !selTech.email && <div style={{ marginBottom:12 }}/>}
               <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:12 }}>
-                {CERTIFS.map(c=>(
-                  <span key={c.key} style={{ fontSize:10, fontWeight:700, color:selTech[c.key]?"#22c55e":"#5a7090", background:selTech[c.key]?"#22c55e22":"#1a2540", border:"1px solid "+(selTech[c.key]?"#22c55e44":"#3d5270"), borderRadius:6, padding:"2px 8px" }}>
-                    {selTech[c.key]?"✓":""} {c.label}
-                  </span>
-                ))}
+                {CERTIFS.map(c=>{
+                  // Lien pastille <-> document : si un doc du meme type est importe,
+                  // la pastille devient cliquable (ouvre le justificatif) et affiche un trombone.
+                  const doc = selDocs.find(d => (d.type||"") === c.label);
+                  const has = selTech[c.key];
+                  return (
+                    <span key={c.key}
+                      onClick={doc ? ()=>window.open(doc.url, "_blank", "noopener") : undefined}
+                      title={doc ? ("Ouvrir le justificatif : "+doc.nom) : undefined}
+                      style={{ fontSize:10, fontWeight:700, color:has?"#22c55e":"#5a7090", background:has?"#22c55e22":"#1a2540", border:"1px solid "+(has?"#22c55e44":"#3d5270"), borderRadius:6, padding:"2px 8px", cursor:doc?"pointer":"default", textDecoration:doc?"underline":"none" }}>
+                      {has?"✓":""} {c.label} {doc?"📎":""}
+                    </span>
+                  );
+                })}
               </div>
 
               {/* Upload document */}
@@ -12335,12 +12344,12 @@ function PlanImplantation({ seuilsGlobaux }) {
       catch(_e) { saisies = {}; }
       Object.keys(saisies).forEach(id=>{ idsSaisis[id] = true; });
     });
-    let postesRelev = postes.filter(p=>idsSaisis[p.id]);
+    let postesRelev = postes.filter(p=>idsSaisis[p.id] && p.statut!=="Désactivé");
     if (postesRelev.length === 0) {
       // Repli : aucune saisie exploitable, on retombe sur le type de passage
       const hasDeiv = passagesDate.some(p=>(p.type||"")==="Insectes volants");
       const hasRongeurs = passagesDate.some(p=>(p.type||"")!=="Insectes volants");
-      postesRelev = postes.filter(p=>{
+      postesRelev = postes.filter(p=>p.statut!=="Désactivé").filter(p=>{
         const isIV = (p.nuisible||"Rongeurs")==="Insectes volants";
         if (hasDeiv && hasRongeurs) return true;
         if (hasDeiv) return isIV;
@@ -12384,8 +12393,11 @@ function PlanImplantation({ seuilsGlobaux }) {
   const activePlanData = plans.find(p=>p.id===activePlan);
   const planImagesArr = (activePlanData && activePlanData.images && activePlanData.images.length) ? activePlanData.images : (activePlanData && activePlanData.img ? [{url:activePlanData.img, name:""}] : []);
   const activePage = Math.min(activePageByPlan[activePlan] || 0, Math.max(0, planImagesArr.length - 1));
+  // Postes desactives : exclus du plan d implantation (pastilles + liste a placer),
+  // mais conserves en base (leur position n est pas supprimee).
+  const postesNonDesactives = postes.filter(p => p.statut !== "Désactivé");
   const planPostes = getPts(activePlan).filter(pt => (pt.page||0) === activePage);
-  const filteredPostes = filterNuisibleArr.length===0 ? postes : postes.filter(p => {
+  const filteredPostes = filterNuisibleArr.length===0 ? postesNonDesactives : postesNonDesactives.filter(p => {
     const nuisible = p.nuisible||"Rongeurs";
     const id = p.id||"";
     return filterNuisibleArr.some(f => {
@@ -12396,7 +12408,7 @@ function PlanImplantation({ seuilsGlobaux }) {
   });
 
   // KPIs for selected date
-  const kpi = selDate ? getPassageStats(selDate) : {tot:0, part:0, ok:postes.length, total:postes.length};
+  const kpi = selDate ? getPassageStats(selDate) : {tot:0, part:0, ok:postesNonDesactives.length, total:postesNonDesactives.length};
 
   async function handlePlanClick(e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -12860,7 +12872,7 @@ function PlanImplantation({ seuilsGlobaux }) {
       {/* KPIs */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
         <div style={{background:"#243352",borderRadius:10,padding:"14px 18px",textAlign:"center"}}>
-          <div style={{fontSize:26,fontWeight:900,color:"#3b82f6"}}>{selDate ? kpi.total : postes.length}</div>
+          <div style={{fontSize:26,fontWeight:900,color:"#3b82f6"}}>{selDate ? kpi.total : postesNonDesactives.length}</div>
           <div style={{fontSize:11,color:"#7a90aa",marginTop:2}}>{selDate ? "Postes contrôlés" : "Postes"}</div>
         </div>
         <div style={{background:"#243352",borderRadius:10,padding:"14px 18px",textAlign:"center"}}>
@@ -12893,11 +12905,11 @@ function PlanImplantation({ seuilsGlobaux }) {
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           <button onClick={()=>setFilterNuisibleArr([])}
             style={{display:"flex",alignItems:"center",gap:6,background:filterNuisibleArr.length===0?"#fff":"transparent",color:filterNuisibleArr.length===0?"#1a2540":"#7a90aa",border:"1px solid "+(filterNuisibleArr.length===0?"#fff":"#3d5270"),borderRadius:20,padding:"5px 14px",fontSize:12,fontWeight:filterNuisibleArr.length===0?700:500,cursor:"pointer",fontFamily:"inherit"}}>
-            Tous ({postes.length})
+            Tous ({postesNonDesactives.length})
           </button>
           {/* Rongeurs Extérieurs */}
           {(()=>{
-            const count = postes.filter(p=>posteEstExt(p)).length;
+            const count = postesNonDesactives.filter(p=>posteEstExt(p)).length;
             if(count===0 || nuisiblesMasques.indexOf("__RE")>=0) return null;
             const active = filterNuisibleArr.includes("__RE");
             const colRE = nuisibleColors["__RE"]||"#1e40af";
@@ -12911,7 +12923,7 @@ function PlanImplantation({ seuilsGlobaux }) {
           })()}
           {/* Rongeurs Intérieurs */}
           {(()=>{
-            const count = postes.filter(p=>posteEstInt(p)).length;
+            const count = postesNonDesactives.filter(p=>posteEstInt(p)).length;
             if(count===0 || nuisiblesMasques.indexOf("__RI")>=0) return null;
             const active = filterNuisibleArr.includes("__RI");
             const colRI = nuisibleColors["__RI"]||"#60a5fa";
@@ -12927,7 +12939,7 @@ function PlanImplantation({ seuilsGlobaux }) {
             if (nuisiblesMasques.indexOf(n)>=0) return null;
             const col=nuisibleColors[n]||"#7a90aa";
             const active=filterNuisibleArr.includes(n);
-            const count=postes.filter(p=>(p.nuisible||"Rongeurs")===n).length;
+            const count=postesNonDesactives.filter(p=>(p.nuisible||"Rongeurs")===n).length;
             return (
               <button key={n} onClick={()=>setFilterNuisibleArr(prev=>active?prev.filter(x=>x!==n):[...prev,n])}
                 style={{display:"flex",alignItems:"center",gap:6,background:active?"#fff":"transparent",color:active?"#1a2540":"#7a90aa",border:"1px solid "+(active?"#fff":"#3d5270"),borderRadius:20,padding:"5px 14px",fontSize:12,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit"}}>
@@ -13359,6 +13371,7 @@ function PlanImplantation({ seuilsGlobaux }) {
             {planPostes.map(pt=>{
               const p=postes.find(p=>p.id===pt.id);
               if(!p)return null;
+              if(p.statut==="Désactivé")return null;   // poste desactive : masque du plan (position conservee en base)
               if(filterNuisibleArr.length>0&&!filterNuisibleArr.some(f=>{if(f==="__RE")return posteEstExt(p);if(f==="__RI")return posteEstInt(p);return (p.nuisible||"Rongeurs")===f;}))return null;
               const col=getPosteColor(p,selDate);
               const isHov=hover===pt.id;
@@ -13461,7 +13474,7 @@ function PlanImplantation({ seuilsGlobaux }) {
             {nuisiblesMasques.indexOf("__RI")<0 && <div style={{display:"flex",alignItems:"center",gap:5}}><PuceForme forme={posteFormes["RI"]||"rond"} col={nuisibleColors["__RI"]||"#60a5fa"}/><span style={{fontSize:11,color:"#7a90aa"}}>Rongeurs int. (RI)</span></div>}
             {NUISIBLES_LIST.filter(n=>n!=="Rongeurs" && nuisiblesMasques.indexOf(n)<0).map(n=>{
               const col=nuisibleColors[n]||"#7a90aa";
-              const count=postes.filter(p=>(p.nuisible||"Rongeurs")===n).length;
+              const count=postesNonDesactives.filter(p=>(p.nuisible||"Rongeurs")===n).length;
               const formeN = posteFormes[n==="Rongeurs"?"RI":n]||"rond";
               return(<div key={n} style={{display:"flex",alignItems:"center",gap:5}}><PuceForme forme={formeN} col={col}/><span style={{fontSize:11,color:"#7a90aa"}}>{n} ({count})</span></div>);
             })}
