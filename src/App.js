@@ -319,6 +319,17 @@ async function sbDelete(table, id) {
   return sbFetch(table + "?id=eq." + id + "&contrat=eq." + CLIENT_CONFIG.contrat + filtreSite(table), "DELETE");
 }
 
+// Nettoie un nom de fichier pour le stockage Supabase : enleve les accents et
+// remplace tout caractere non alphanumerique (hors . _ -) par _. Sans ca, un nom
+// avec accent/espace/caractere special (ex: "Habilitation electrique.pdf") fait
+// echouer l upload avec une erreur 400 (cle de stockage invalide).
+function sanitizeFileName(name) {
+  return String(name || "fichier")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")   // enleve les accents
+    .replace(/[^a-zA-Z0-9._-]/g, "_")                    // remplace le reste par _
+    .replace(/_+/g, "_");                                // compacte les _ multiples
+}
+
 // Place ou deplace un poste sur un plan. Un poste ne peut etre que sur un seul plan a la fois
 // (contrainte unique en base sur contrat+poste_id). Si le poste existe deja ailleurs, on le
 // deplace (UPDATE plan_id+x+y) au lieu de tenter un INSERT qui echouerait en doublon.
@@ -8511,7 +8522,7 @@ function Produits() {
   async function uploadDoc(produitId, file, type) {
     if (!file) return;
     setUploading(produitId+"_"+type);
-    const path = CLIENT_CONFIG.contrat + "/produits/" + produitId + "_" + Date.now() + "_" + file.name;
+    const path = CLIENT_CONFIG.contrat + "/produits/" + produitId + "_" + Date.now() + "_" + sanitizeFileName(file.name);
     try {
       const res = await fetch(SUPABASE_URL + "/storage/v1/object/documents/" + path, {
         method:"POST",
@@ -8779,7 +8790,7 @@ function Habilitations() {
   async function uploadDoc(techId, file, type) {
     if (!file) return;
     setUploading(techId+"_"+type);
-    const path = CLIENT_CONFIG.contrat + "/hab/" + techId + "_" + type.replace(/ /g,"_") + "_" + Date.now() + "_" + file.name;
+    const path = CLIENT_CONFIG.contrat + "/hab/" + techId + "_" + type.replace(/ /g,"_") + "_" + Date.now() + "_" + sanitizeFileName(file.name);
     try {
       const res = await fetch(SUPABASE_URL + "/storage/v1/object/documents/" + path, {
         method:"POST",
@@ -9113,7 +9124,7 @@ function Agrements() {
   async function uploadDoc(agId, file) {
     if (!file) return;
     setUploading(agId);
-    const path = CLIENT_CONFIG.contrat + "/agrements/" + agId + "_" + Date.now() + "_" + file.name;
+    const path = CLIENT_CONFIG.contrat + "/agrements/" + agId + "_" + Date.now() + "_" + sanitizeFileName(file.name);
     try {
       const res = await fetch(SUPABASE_URL + "/storage/v1/object/documents/" + path, {
         method:"POST",
@@ -9310,7 +9321,7 @@ function ContratDevis() {
   async function uploadDoc(docId, file) {
     if (!file) return;
     setUploading(docId);
-    const path = CLIENT_CONFIG.contrat + "/contrats/" + docId + "_" + Date.now() + "_" + file.name;
+    const path = CLIENT_CONFIG.contrat + "/contrats/" + docId + "_" + Date.now() + "_" + sanitizeFileName(file.name);
     try {
       const res = await fetch(SUPABASE_URL + "/storage/v1/object/documents/" + path, {
         method:"POST",
