@@ -8779,7 +8779,7 @@ function Habilitations() {
   async function uploadDoc(techId, file, type) {
     if (!file) return;
     setUploading(techId+"_"+type);
-    const path = CLIENT_CONFIG.contrat + "/hab/" + techId + "_" + type.replace(/ /g,"_") + "_" + file.name;
+    const path = CLIENT_CONFIG.contrat + "/hab/" + techId + "_" + type.replace(/ /g,"_") + "_" + Date.now() + "_" + file.name;
     try {
       const res = await fetch(SUPABASE_URL + "/storage/v1/object/documents/" + path, {
         method:"POST",
@@ -9310,7 +9310,7 @@ function ContratDevis() {
   async function uploadDoc(docId, file) {
     if (!file) return;
     setUploading(docId);
-    const path = CLIENT_CONFIG.contrat + "/contrats/" + docId + "_" + file.name;
+    const path = CLIENT_CONFIG.contrat + "/contrats/" + docId + "_" + Date.now() + "_" + file.name;
     try {
       const res = await fetch(SUPABASE_URL + "/storage/v1/object/documents/" + path, {
         method:"POST",
