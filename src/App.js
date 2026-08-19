@@ -821,6 +821,30 @@ function moleculesToxiquesTexte(passages, postesRongeurs) {
 // Couleur d un poste selon son type et ses seuils (meme logique que les pastilles
 // du plan) : "rouge" (seuil critique), "orange" (seuil vigilance) ou "vert".
 // s = saisie du poste, p = poste (pour connaitre le nuisible), seuils = seuils globaux.
+// --- Seuils DEIV par GROUPES nommes ---------------------------------------
+// seuils.deivGroupes = [{ id, nom, deivs:[posteId...], total:{leger,moyen}, cats:{cat:{leger,moyen}} }]
+// Un DEIV d un groupe utilise les seuils du groupe (par categorie + total) ; sinon repli sur seuils.iv.
+function groupeDeivPour(poste, seuils) {
+  const gs = (seuils && seuils.deivGroupes) || [];
+  if (!poste) return null;
+  for (var i=0;i<gs.length;i++){ if (gs[i] && Array.isArray(gs[i].deivs) && gs[i].deivs.indexOf(poste.id)>=0) return gs[i]; }
+  return null;
+}
+function niveauDeiv(s, poste, seuils) {
+  const CATS = ["Moucherons","Mouches","Moustiques","Hyménoptères","Lépidoptères","Coléoptères","Punaises","Tipules"];
+  const g = groupeDeivPour(poste, seuils);
+  const cats = (g && g.cats) || (seuils && seuils.iv) || {};
+  var max = 0, tot = 0;
+  CATS.forEach(function(cat){
+    const v = parseInt((s && s["iv_"+cat])||0); tot += v;
+    const sv = cats[cat] || {leger:999,moyen:9999};
+    if (v>=sv.moyen) max = Math.max(max,2); else if (v>=sv.leger) max = Math.max(max,1);
+  });
+  if (g && g.total && (g.total.leger || g.total.moyen)) {
+    if (tot>=g.total.moyen) max = Math.max(max,2); else if (tot>=g.total.leger) max = Math.max(max,1);
+  }
+  return max;
+}
 export function couleurSeuilPoste(p, s, seuils) {
   if (!p || !s || !seuils) return "vert";
   const CATS_IV = ["Moucherons","Mouches","Moustiques","Hyménoptères","Lépidoptères","Coléoptères","Punaises","Tipules"];
@@ -857,12 +881,7 @@ export function couleurSeuilPoste(p, s, seuils) {
   if (nuisible === "Teignes") { const v=parseInt(s.etat||0); const t=seuils.teignes||{}; return v>=t.moyen?"rouge":v>=t.leger?"orange":"vert"; }
   if (nuisible === "IPS")     { const v=parseInt(s.etat||0); const i=seuils.ips||{};     return v>=i.moyen?"rouge":v>=i.leger?"orange":"vert"; }
   if (nuisible === "Insectes volants") {
-    let max = 0;
-    CATS_IV.forEach(function(cat){
-      const v = parseInt(s["iv_"+cat]||0);
-      const sv = (seuils.iv||{})[cat] || {leger:999,moyen:9999};
-      if (v>=sv.moyen) max = Math.max(max,2); else if (v>=sv.leger) max = Math.max(max,1);
-    });
+    const max = niveauDeiv(s, p, seuils);   // groupe DEIV (par categorie + total) ou repli global
     return max===2?"rouge":max===1?"orange":"vert";
   }
   return "vert";
@@ -5089,6 +5108,7 @@ function DeivParAppareilChart({ passages, postes }) {
     Tipules:      { leger:10,  moyen:20  },
   };
   const [seuilsIV, setSeuilsIV] = useState(DEFAULT_SEUILS_IV);
+  const [deivGroupes, setDeivGroupes] = useState([]);
 
   useEffect(() => {
     sbGet("seuils").then(data => {
@@ -5096,6 +5116,7 @@ function DeivParAppareilChart({ passages, postes }) {
         try {
           const parsed = typeof data[0].data === "string" ? JSON.parse(data[0].data) : data[0].data;
           if (parsed.iv) setSeuilsIV({...DEFAULT_SEUILS_IV, ...parsed.iv});
+          if (Array.isArray(parsed.deivGroupes)) setDeivGroupes(parsed.deivGroupes);
         } catch(_e) { return; }
       }
     }).catch(()=>{});
@@ -5150,6 +5171,10 @@ function DeivParAppareilChart({ passages, postes }) {
   });
   const topDeivSorted = [...deivList].sort((a,b)=>(totauxParDeiv[b.id]||0)-(totauxParDeiv[a.id]||0));
   const deivActif = selectedDeiv || (topDeivSorted.length>0 ? topDeivSorted[0].id : "");
+  // Seuils effectifs de l appareil affiche : ceux de son groupe DEIV si present, sinon les globaux.
+  const grpDeiv = (deivGroupes||[]).find(g=>g && Array.isArray(g.deivs) && g.deivs.indexOf(deivActif)>=0) || null;
+  const seuilsEff = (grpDeiv && grpDeiv.cats) ? {...seuilsIV, ...grpDeiv.cats} : seuilsIV;
+  const seuilTotalGrp = (grpDeiv && grpDeiv.total && (grpDeiv.total.leger||grpDeiv.total.moyen)) ? grpDeiv.total : null;
 
   function getStats(passage) {
     const saisies = typeof passage.saisies === "string" ? JSON.parse(passage.saisies||"{}") : (passage.saisies||{});
@@ -5175,8 +5200,8 @@ function DeivParAppareilChart({ passages, postes }) {
   // Seuils traces : soit le type choisi explicitement, soit les especes affichees
   const seuilCats = seuilCat !== "auto" ? [seuilCat] : (selectedCats.length > 0 ? selectedCats : CATS);
   const seuilRef = !showSeuils ? 0
-    : seuilCat !== "auto" ? ((seuilsIV[seuilCat]||{}).moyen || 0)
-    : (selectedCats.length === 1 && seuilsIV[selectedCats[0]]) ? seuilsIV[selectedCats[0]].moyen : 0;
+    : seuilCat !== "auto" ? ((seuilsEff[seuilCat]||{}).moyen || 0)
+    : (selectedCats.length === 1 && seuilsEff[selectedCats[0]]) ? seuilsEff[selectedCats[0]].moyen : 0;
   const maxDonnees = Math.max(...stats.map(s=>s.total), ...statsParAnnee.flatMap(sa=>sa.stats.map(s=>s.total)), seuilRef, 1);
   const maxAuto = Math.max(5, Math.ceil(maxDonnees*1.25/5)*5);
   const maxVal = echelle === "manuel" ? Math.max(1, parseInt(maxManuel)||10) : maxAuto;
@@ -5300,7 +5325,7 @@ function DeivParAppareilChart({ passages, postes }) {
         <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Seuil affiché</label>
         <select value={seuilCat} onChange={e=>setSeuilCat(e.target.value)} style={inpStyle}>
           <option value="auto">Espèces affichées</option>
-          {CATS.filter(c=>seuilsIV[c]).map(c=><option key={c} value={c}>{c}</option>)}
+          {CATS.filter(c=>seuilsEff[c]).map(c=><option key={c} value={c}>{c}</option>)}
         </select>
       </div>
       <button onClick={()=>{setSelectedDeiv("");setFilterAnnee("Toutes");setSelectedAnnees([]);setFilterTrimestre("Tous");setFilterMois("Tous");setSelectedCats([]);setEchelle("auto");setSeuilCat("auto");}}
@@ -5333,9 +5358,9 @@ function DeivParAppareilChart({ passages, postes }) {
         {[0,25,50,75,100].map(pct=>{ const v=Math.round(maxVal*pct/100); const y=yVal(v); return(<g key={pct}><line x1={PAD} x2={W-PAD} y1={y} y2={y} stroke="#2d3f62" strokeWidth="1"/><text x={PAD-4} y={y+4} fontSize="9" fill="#5a7090" textAnchor="end">{v}</text></g>); })}
         {showSeuils && (()=>{
           const catsToShow = seuilCats;
-          return catsToShow.filter(cat=>seuilsIV[cat]).map(cat=>{
-            const sl = seuilsIV[cat].leger;
-            const sm = seuilsIV[cat].moyen;
+          const catLines = catsToShow.filter(cat=>seuilsEff[cat]).map(cat=>{
+            const sl = seuilsEff[cat].leger;
+            const sm = seuilsEff[cat].moyen;
             const col = CAT_COLORS[cat]||"#f59e0b";
             return (<g key={cat}>
               {sl<=maxVal && (<>
@@ -5348,6 +5373,20 @@ function DeivParAppareilChart({ passages, postes }) {
               </>)}
             </g>);
           });
+          // Ligne de seuil TOTAL du groupe (la courbe = total insectes) : violet.
+          const totalLine = seuilTotalGrp ? (
+            <g key="__totalgrp__">
+              {(seuilTotalGrp.leger||0)>0 && seuilTotalGrp.leger<=maxVal && (<>
+                <line x1={PAD} x2={W-PAD} y1={yVal(seuilTotalGrp.leger)} y2={yVal(seuilTotalGrp.leger)} stroke="#c084fc" strokeWidth="1.5" strokeDasharray="6,3"/>
+                <text x={W-PAD+4} y={yVal(seuilTotalGrp.leger)+4} fontSize="8" fill="#c084fc">Total {seuilTotalGrp.leger}</text>
+              </>)}
+              {(seuilTotalGrp.moyen||0)>0 && seuilTotalGrp.moyen<=maxVal && (<>
+                <line x1={PAD} x2={W-PAD} y1={yVal(seuilTotalGrp.moyen)} y2={yVal(seuilTotalGrp.moyen)} stroke="#c084fc" strokeWidth="2" strokeDasharray="4,3"/>
+                <text x={W-PAD+4} y={yVal(seuilTotalGrp.moyen)+4} fontSize="8" fill="#c084fc" fontWeight="700">Total {seuilTotalGrp.moyen}</text>
+              </>)}
+            </g>
+          ) : null;
+          return totalLine ? [totalLine, ...catLines] : catLines;
         })()}
         {statsParAnnee.length > 1 ? statsParAnnee.map((sa,ai)=>{
           if(sa.stats.length < 1) return null;
@@ -7392,13 +7431,7 @@ function SaisiePassage({ seuilsGlobaux, setSeuilsGlobaux, setReinterventions, se
       return v>=seuils.teignes.moyen?"#ef4444":v>=seuils.teignes.leger?"#f59e0b":"#22c55e";
     }
     if (nuisible==="Insectes volants") {
-      let max = 0;
-      CATS_IV.forEach(cat => {
-        const v = parseInt(s["iv_"+cat]||0);
-        const sv = seuils.iv[cat]||{leger:999,moyen:9999};
-        if (v>=sv.moyen) max = Math.max(max,2);
-        else if (v>=sv.leger) max = Math.max(max,1);
-      });
+      const max = niveauDeiv(s, p, seuils);   // groupe DEIV (par categorie + total) ou repli global
       return max===2?"#ef4444":max===1?"#f59e0b":"#22c55e";
     }
     if (nuisible==="IPS") {
@@ -7722,6 +7755,53 @@ function SaisiePassage({ seuilsGlobaux, setSeuilsGlobaux, setReinterventions, se
                 </div>
               ))}
             </div>
+          </Card>
+          <Card style={{marginBottom:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontSize:14,fontWeight:700,color:"#f1f5f9"}}>Groupes de seuils DEIV</div>
+              <button onClick={()=>setSeuils(prev=>({...prev, deivGroupes:[...(prev.deivGroupes||[]), {id:"grp_"+Date.now(), nom:"Nouveau groupe", deivs:[], total:{leger:0,moyen:0}, cats:{}}]}))}
+                style={{background:"#22c55e",color:"#fff",border:"none",borderRadius:7,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Nouveau groupe</button>
+            </div>
+            <div style={{fontSize:10,color:"#7a90aa",marginBottom:10,fontStyle:"italic"}}>Chaque groupe applique ses seuils (par categorie + total) aux DEIV qui lui sont ajoutes. Un DEIV hors groupe garde les seuils globaux ci-dessus.</div>
+            {((seuils.deivGroupes)||[]).length===0 && <div style={{fontSize:11,color:"#5a7090"}}>Aucun groupe. Cliquez « + Nouveau groupe ».</div>}
+            {((seuils.deivGroupes)||[]).map((g,gi)=>{
+              const upd=(patch)=>setSeuils(prev=>({...prev,deivGroupes:(prev.deivGroupes||[]).map((x,i2)=>i2===gi?{...x,...patch}:x)}));
+              const updCat=(cat,key,val)=>setSeuils(prev=>({...prev,deivGroupes:(prev.deivGroupes||[]).map((x,i2)=>i2===gi?{...x,cats:{...(x.cats||{}),[cat]:{...((x.cats||{})[cat]||{}),[key]:parseInt(val)||0}}}:x)}));
+              const deivPostes=postes.filter(pp=>pp.type==="DEIV");
+              return (
+                <div key={g.id||gi} style={{border:"1px solid #3d5270",borderRadius:8,padding:"10px 12px",marginBottom:10}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+                    <input value={g.nom||""} onChange={e=>upd({nom:e.target.value})} placeholder="Nom du groupe" style={{...inpStyle,flex:1,fontWeight:700}}/>
+                    <button onClick={()=>setSeuils(prev=>({...prev,deivGroupes:(prev.deivGroupes||[]).filter((x,i2)=>i2!==gi)}))} style={{background:"#ef444422",color:"#ef4444",border:"1px solid #ef444433",borderRadius:5,padding:"4px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Supprimer</button>
+                  </div>
+                  <div style={{fontSize:9,color:"#7a90aa",marginBottom:4}}>DEIV du groupe ({(g.deivs||[]).length})</div>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8,maxHeight:110,overflowY:"auto"}}>
+                    {deivPostes.map(dp=>{
+                      const on=(g.deivs||[]).indexOf(dp.id)>=0;
+                      return <button key={dp.id} onClick={()=>upd({deivs: on?(g.deivs||[]).filter(x=>x!==dp.id):[...(g.deivs||[]),dp.id]})}
+                        style={{background:on?"#3b82f622":"transparent",color:on?"#3b82f6":"#7a90aa",border:"1px solid "+(on?"#3b82f6":"#3d5270"),borderRadius:14,padding:"2px 8px",fontSize:10,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit"}}>{dp.id}</button>;
+                    })}
+                  </div>
+                  <div style={{display:"flex",gap:10,alignItems:"flex-end",marginBottom:8}}>
+                    <div><div style={{fontSize:9,color:"#c084fc",fontWeight:700,marginBottom:2}}>TOTAL — Orange min</div>
+                      <input type="number" min="0" value={(g.total||{}).leger||0} onChange={e=>upd({total:{...(g.total||{}),leger:parseInt(e.target.value)||0}})} style={{...inpStyle,width:70}}/></div>
+                    <div><div style={{fontSize:9,color:"#c084fc",fontWeight:700,marginBottom:2}}>TOTAL — Rouge min</div>
+                      <input type="number" min="0" value={(g.total||{}).moyen||0} onChange={e=>upd({total:{...(g.total||{}),moyen:parseInt(e.target.value)||0}})} style={{...inpStyle,width:70}}/></div>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:6}}>
+                    {CATS_IV.map(cat=>(
+                      <div key={cat} style={{background:"#1a2540",borderRadius:6,padding:"6px 8px"}}>
+                        <div style={{fontSize:10,color:"#94a3b8",marginBottom:4}}>{cat}</div>
+                        <div style={{display:"flex",gap:6}}>
+                          <input type="number" min="0" title="Orange min" value={((g.cats||{})[cat]||{}).leger||0} onChange={e=>updCat(cat,"leger",e.target.value)} style={{...inpStyle,fontSize:11,padding:"3px 6px",width:52}}/>
+                          <input type="number" min="0" title="Rouge min" value={((g.cats||{})[cat]||{}).moyen||0} onChange={e=>updCat(cat,"moyen",e.target.value)} style={{...inpStyle,fontSize:11,padding:"3px 6px",width:52}}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </Card>
           <Card>
             <div style={{fontSize:14,fontWeight:700,color:"#f1f5f9",marginBottom:14}}>Seuils IPS</div>
@@ -8127,7 +8207,7 @@ function SaisiePassage({ seuilsGlobaux, setSeuilsGlobaux, setReinterventions, se
                           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:6}}>
                             {CATS_IV.map(cat=>{
                               const v = parseInt(s["iv_"+cat]||0);
-                              const sv = seuils.iv[cat]||{leger:999,moyen:9999};
+                              const sv = (((groupeDeivPour(p,seuils)||{}).cats)||seuils.iv||{})[cat]||{leger:999,moyen:9999};
                               const col = v>=sv.moyen?"#ef4444":v>=sv.leger?"#f59e0b":"#22c55e";
                               return (
                                 <div key={cat} style={{display:"flex",alignItems:"center",gap:6,background:"#1a2540",borderRadius:6,padding:"5px 8px"}}>
