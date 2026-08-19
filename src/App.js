@@ -3805,6 +3805,7 @@ function StatutGraph({ passagesFiltres }) {
 function TauxActiviteChart({ passages, postes }) {
   const [typeFilter, setTypeFilter] = usePersistedValue("TauxActivite_typeFilter", "tous"); // tous | RE | RI
   const [macroFilter, setMacroFilter] = usePersistedValue("TauxActivite_macroFilter", "Toutes"); // zone macro, cumulable avec le type
+  const [produitNuFilter, setProduitNuFilter] = usePersistedValue("TauxActivite_produitNuFilter", "tous"); // tous | oui | non
   const [filterAnnee, setFilterAnnee] = usePersistedValue("TauxActivite_filterAnnee", anneeDefaut(passages));
   const [selectedAnnees, setSelectedAnnees] = usePersistedValue("TauxActivite_selectedAnnees", []);
   const [filterTrimestre, setFilterTrimestre] = usePersistedValue("TauxActivite_filterTrimestre", "Tous");
@@ -3831,7 +3832,7 @@ function TauxActiviteChart({ passages, postes }) {
   const pd = d => { if(!d) return new Date(0); const p=(d||"").split("/"); return p.length===3?new Date(p[2]+"-"+p[1]+"-"+p[0]):new Date(d); };
   const MOIS_LABELS = ["Jan.","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Dec"];
 
-  const postesRongeurs = postes.filter(p => (p.nuisible||"Rongeurs") === "Rongeurs" && (typeFilter==="tous" || p.type===typeFilter) && (macroFilter==="Toutes" || (p.macro||"")===macroFilter));
+  const postesRongeurs = postes.filter(p => (p.nuisible||"Rongeurs") === "Rongeurs" && (typeFilter==="tous" || p.type===typeFilter) && (macroFilter==="Toutes" || (p.macro||"")===macroFilter) && (produitNuFilter==="tous" || (produitNuFilter==="oui" ? !!p.produit_nu : !p.produit_nu)));
   const macrosDispo = ["Toutes", ...Array.from(new Set(postes.filter(p=>(p.nuisible||"Rongeurs")==="Rongeurs").map(p=>p.macro).filter(Boolean)))];
 
   const annees = [...new Set(passages.filter(p=>p.type!=="Insectes volants").map(p=>{ const d=pd(p.date); return d&&!isNaN(d)?d.getFullYear():null; }).filter(Boolean))].sort((a,b)=>a-b);
@@ -3985,7 +3986,8 @@ function TauxActiviteChart({ passages, postes }) {
               </div>
               <div>
                 <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Zone macro</label>
-                <select value={macroFilter} onChange={e=>setMacroFilter(e.target.value)} style={inpStyle}>
+                <select value={produitNuFilter} onChange={e=>setProduitNuFilter(e.target.value)} style={inpStyle}><option value="tous">Produit nu : tous</option><option value="oui">En zone produit nu</option><option value="non">Hors produit nu</option></select>
+        <select value={macroFilter} onChange={e=>setMacroFilter(e.target.value)} style={inpStyle}>
                   {macrosDispo.map(m=><option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
@@ -4107,7 +4109,8 @@ function TauxActiviteChart({ passages, postes }) {
         </div>
         <div>
           <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Zone macro</label>
-          <select value={macroFilter} onChange={e=>setMacroFilter(e.target.value)} style={inpStyle}>
+          <select value={produitNuFilter} onChange={e=>setProduitNuFilter(e.target.value)} style={inpStyle}><option value="tous">Produit nu : tous</option><option value="oui">En zone produit nu</option><option value="non">Hors produit nu</option></select>
+        <select value={macroFilter} onChange={e=>setMacroFilter(e.target.value)} style={inpStyle}>
             {macrosDispo.map(m=><option key={m} value={m}>{m}</option>)}
           </select>
         </div>
@@ -4208,6 +4211,7 @@ function TauxActiviteChart({ passages, postes }) {
 function CapturesChart({ passages, postes }) {
   const [typeFilter, setTypeFilter] = usePersistedValue("Captures_typeFilter", "tous"); // tous | RE | RI
   const [macroFilter, setMacroFilter] = usePersistedValue("Captures_macroFilter", "Toutes"); // zone macro, cumulable avec le type
+  const [produitNuFilter, setProduitNuFilter] = usePersistedValue("Captures_produitNuFilter", "tous"); // tous | oui | non
   const [filterAnnee, setFilterAnnee] = usePersistedValue("Captures_filterAnnee", anneeDefaut(passages));
   const [selectedAnnees, setSelectedAnnees] = usePersistedValue("Captures_selectedAnnees", []);
   const [filterTrimestre, setFilterTrimestre] = usePersistedValue("Captures_filterTrimestre", "Tous");
@@ -4220,7 +4224,7 @@ function CapturesChart({ passages, postes }) {
   const pd = d => { if(!d) return new Date(0); const p=(d||"").split("/"); return p.length===3?new Date(p[2]+"-"+p[1]+"-"+p[0]):new Date(d); };
   const MOIS_LABELS = ["Jan.","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Dec"];
 
-  const postesRongeurs = postes.filter(p => (p.nuisible||"Rongeurs") === "Rongeurs" && (typeFilter==="tous" || p.type===typeFilter) && (macroFilter==="Toutes" || (p.macro||"")===macroFilter));
+  const postesRongeurs = postes.filter(p => (p.nuisible||"Rongeurs") === "Rongeurs" && (typeFilter==="tous" || p.type===typeFilter) && (macroFilter==="Toutes" || (p.macro||"")===macroFilter) && (produitNuFilter==="tous" || (produitNuFilter==="oui" ? !!p.produit_nu : !p.produit_nu)));
   const macrosDispo = ["Toutes", ...Array.from(new Set(postes.filter(p=>(p.nuisible||"Rongeurs")==="Rongeurs").map(p=>p.macro).filter(Boolean)))];
 
   const annees = [...new Set(passages.filter(p=>p.type!=="Insectes volants").map(p=>{ const d=pd(p.date); return d&&!isNaN(d)?d.getFullYear():null; }).filter(Boolean))].sort((a,b)=>a-b);
@@ -4338,6 +4342,7 @@ function CapturesChart({ passages, postes }) {
       </div>
       <div>
         <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Zone macro</label>
+        <select value={produitNuFilter} onChange={e=>setProduitNuFilter(e.target.value)} style={inpStyle}><option value="tous">Produit nu : tous</option><option value="oui">En zone produit nu</option><option value="non">Hors produit nu</option></select>
         <select value={macroFilter} onChange={e=>setMacroFilter(e.target.value)} style={inpStyle}>
           {macrosDispo.map(m=><option key={m} value={m}>{m}</option>)}
         </select>
@@ -4454,6 +4459,7 @@ function CapturesChart({ passages, postes }) {
 function PostesTouchesChart({ passages, postes }) {
   const [typeFilter, setTypeFilter] = usePersistedValue("PostesTouches_typeFilter", "tous"); // tous | RE | RI
   const [macroFilter, setMacroFilter] = usePersistedValue("PostesTouches_macroFilter", "Toutes"); // zone macro, cumulable avec le type
+  const [produitNuFilter, setProduitNuFilter] = usePersistedValue("PostesTouches_produitNuFilter", "tous"); // tous | oui | non
   const [filterAnnee, setFilterAnnee] = usePersistedValue("PostesTouches_filterAnnee", anneeDefaut(passages));
   const [selectedAnnees, setSelectedAnnees] = usePersistedValue("PostesTouches_selectedAnnees", []);
   const [filterTrimestre, setFilterTrimestre] = usePersistedValue("PostesTouches_filterTrimestre", "Tous");
@@ -4467,7 +4473,7 @@ function PostesTouchesChart({ passages, postes }) {
   const pd = d => { if(!d) return new Date(0); const p=(d||"").split("/"); return p.length===3?new Date(p[2]+"-"+p[1]+"-"+p[0]):new Date(d); };
   const MOIS_LABELS = ["Jan.","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Dec"];
 
-  const postesRongeurs = postes.filter(p => (p.nuisible||"Rongeurs") === "Rongeurs" && (typeFilter==="tous" || p.type===typeFilter) && (macroFilter==="Toutes" || (p.macro||"")===macroFilter));
+  const postesRongeurs = postes.filter(p => (p.nuisible||"Rongeurs") === "Rongeurs" && (typeFilter==="tous" || p.type===typeFilter) && (macroFilter==="Toutes" || (p.macro||"")===macroFilter) && (produitNuFilter==="tous" || (produitNuFilter==="oui" ? !!p.produit_nu : !p.produit_nu)));
   const macrosDispo = ["Toutes", ...Array.from(new Set(postes.filter(p=>(p.nuisible||"Rongeurs")==="Rongeurs").map(p=>p.macro).filter(Boolean)))];
   const totalPostes = postesRongeurs.length;
 
@@ -4592,6 +4598,7 @@ function PostesTouchesChart({ passages, postes }) {
       </div>
       <div>
         <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Zone macro</label>
+        <select value={produitNuFilter} onChange={e=>setProduitNuFilter(e.target.value)} style={inpStyle}><option value="tous">Produit nu : tous</option><option value="oui">En zone produit nu</option><option value="non">Hors produit nu</option></select>
         <select value={macroFilter} onChange={e=>setMacroFilter(e.target.value)} style={inpStyle}>
           {macrosDispo.map(m=><option key={m} value={m}>{m}</option>)}
         </select>
@@ -4723,7 +4730,8 @@ function PostesTouchesChart({ passages, postes }) {
 }
 
 
-function DeivEvolutionStandaloneChart({ passages }) {
+function DeivEvolutionStandaloneChart({ passages, postes }) {
+  postes = postes || [];
   const CATS = ["Moucherons","Mouches","Moustiques","Hyménoptères","Lépidoptères","Coléoptères","Punaises","Tipules"];
   const CAT_COLORS = {"Moucherons":"#f59e0b","Mouches":"#ef4444","Moustiques":"#3b82f6","Hyménoptères":"#22c55e","Lépidoptères":"#8b5cf6","Coléoptères":"#06b6d4","Punaises":"#f97316","Tipules":"#7a90aa"};
   const DEFAULT_SEUILS = {
@@ -4738,6 +4746,12 @@ function DeivEvolutionStandaloneChart({ passages }) {
   };
 
   const [selectedCats, setSelectedCats] = usePersistedValue("DeivEvolution_selectedCats", []); // [] = Total toutes especes
+  const [produitNuFilter, setProduitNuFilter] = usePersistedValue("DeivEvolution_produitNuFilter", "tous"); // tous | oui | non
+  const [natureFilter, setNatureFilter] = usePersistedValue("DeivEvolution_natureFilter", "toutes"); // toutes | Destructeur | Monitoring
+  const _deivFilterActive = produitNuFilter!=="tous" || natureFilter!=="toutes";
+  const allowedDeivSet = _deivFilterActive ? new Set(postes.filter(p => p.type==="DEIV"
+      && (produitNuFilter==="tous" || (produitNuFilter==="oui" ? !!p.produit_nu : !p.produit_nu))
+      && (natureFilter==="toutes" || (p.nature||"")===natureFilter)).map(p=>p.id)) : null;
   const [filterAnnee, setFilterAnnee] = usePersistedValue("DeivEvolution_filterAnnee", anneeDefaut(passages.filter(p=>p.type==="Insectes volants")));
   const [selectedAnnees, setSelectedAnnees] = usePersistedValue("DeivEvolution_selectedAnnees", []);
   const [filterTrimestre, setFilterTrimestre] = usePersistedValue("DeivEvolution_filterTrimestre", "Tous");
@@ -4795,12 +4809,12 @@ function DeivEvolutionStandaloneChart({ passages }) {
     const result = { date: passage.date };
     if (selectedCats.length === 0) {
       let total = 0;
-      Object.values(saisies).forEach(s=>{ CATS.forEach(cat=>{ total += parseInt(s["iv_"+cat]||0); }); });
+      Object.entries(saisies).forEach(([__id,s])=>{ if(allowedDeivSet && !allowedDeivSet.has(__id)) return; CATS.forEach(cat=>{ total += parseInt(s["iv_"+cat]||0); }); });
       result.__TOTAL__ = total;
     } else {
       selectedCats.forEach(cat=>{
         let val = 0;
-        Object.values(saisies).forEach(s=>{ val += parseInt(s["iv_"+cat]||0); });
+        Object.entries(saisies).forEach(([__id,s])=>{ if(allowedDeivSet && !allowedDeivSet.has(__id)) return; val += parseInt(s["iv_"+cat]||0); });
         result[cat] = val;
       });
     }
@@ -4914,6 +4928,18 @@ function DeivEvolutionStandaloneChart({ passages }) {
           })}
           {selectedAnnees.length>0&&<button onClick={()=>setSelectedAnnees([])} style={{background:"transparent",color:"#ef4444",border:"1px solid #ef444433",borderRadius:6,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>x</button>}
         </div>
+      </div>
+      <div>
+        <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Produit nu</label>
+        <select value={produitNuFilter} onChange={e=>setProduitNuFilter(e.target.value)} style={inpStyle}>
+          <option value="tous">Tous</option><option value="oui">En zone produit nu</option><option value="non">Hors produit nu</option>
+        </select>
+      </div>
+      <div>
+        <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Nature</label>
+        <select value={natureFilter} onChange={e=>setNatureFilter(e.target.value)} style={inpStyle}>
+          <option value="toutes">Toutes</option><option value="Destructeur">Destructeur</option><option value="Monitoring">Monitoring</option>
+        </select>
       </div>
       <div>
         <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Trimestre</label>
@@ -5043,6 +5069,8 @@ function DeivParAppareilChart({ passages, postes }) {
   const [filterTrimestre, setFilterTrimestre] = usePersistedValue("DeivParAppareil_filterTrimestre", "Tous");
   const [filterMois, setFilterMois] = usePersistedValue("DeivParAppareil_filterMois", "Tous");
   const [selectedCats, setSelectedCats] = usePersistedValue("DeivParAppareil_selectedCats", []);
+  const [produitNuFilter, setProduitNuFilter] = usePersistedValue("DeivParAppareil_produitNuFilter", "tous"); // tous | oui | non
+  const [natureFilter, setNatureFilter] = usePersistedValue("DeivParAppareil_natureFilter", "toutes"); // toutes | Destructeur | Monitoring
   const [showSeuils, setShowSeuils] = usePersistedValue("DeivParAppareil_showSeuils", true);
   const [fullscreen, setFullscreen] = useState(false);
   const [collapsed, setCollapsed] = usePersistedCollapsed("DeivParAppareil", false);
@@ -5078,7 +5106,9 @@ function DeivParAppareilChart({ passages, postes }) {
   const CATS = ["Moucherons","Mouches","Moustiques","Hyménoptères","Lépidoptères","Coléoptères","Punaises","Tipules"];
   const CAT_COLORS = {"Moucherons":"#f59e0b","Mouches":"#ef4444","Moustiques":"#3b82f6","Hyménoptères":"#22c55e","Lépidoptères":"#8b5cf6","Coléoptères":"#06b6d4","Punaises":"#f97316","Tipules":"#7a90aa"};
 
-  const deivList = postes.filter(p => p.type === "DEIV").sort((a,b) => {
+  const deivList = postes.filter(p => p.type === "DEIV"
+      && (produitNuFilter==="tous" || (produitNuFilter==="oui" ? !!p.produit_nu : !p.produit_nu))
+      && (natureFilter==="toutes" || (p.nature||"")===natureFilter)).sort((a,b) => {
     const na = parseInt((a.id.match(/\d+/)||["0"])[0]);
     const nb = parseInt((b.id.match(/\d+/)||["0"])[0]);
     return na - nb;
@@ -5229,6 +5259,18 @@ function DeivParAppareilChart({ passages, postes }) {
           })}
           {selectedAnnees.length>0&&<button onClick={()=>setSelectedAnnees([])} style={{background:"transparent",color:"#ef4444",border:"1px solid #ef444433",borderRadius:6,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>x</button>}
         </div>
+      </div>
+      <div>
+        <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Produit nu</label>
+        <select value={produitNuFilter} onChange={e=>setProduitNuFilter(e.target.value)} style={inpStyle}>
+          <option value="tous">Tous</option><option value="oui">En zone produit nu</option><option value="non">Hors produit nu</option>
+        </select>
+      </div>
+      <div>
+        <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Nature</label>
+        <select value={natureFilter} onChange={e=>setNatureFilter(e.target.value)} style={inpStyle}>
+          <option value="toutes">Toutes</option><option value="Destructeur">Destructeur</option><option value="Monitoring">Monitoring</option>
+        </select>
       </div>
       <div>
         <label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:3}}>Trimestre</label>
@@ -6112,7 +6154,7 @@ function Statistiques() {
           </div>
 
           {/* Graphes avances */}
-          <div className="export-card-block"><DeivEvolutionStandaloneChart passages={passages} /></div>
+          <div className="export-card-block"><DeivEvolutionStandaloneChart passages={passages} postes={postesActifs} /></div>
           <div className="export-card-block"><TeignesEvolutionChart passages={passages} postes={postesActifs} /></div>
           <div className="export-card-block"><DeivParAppareilChart passages={passages} postes={postesActifs} /></div>
           <div className="export-card-block"><ReinterPassagesChart passages={passages} reinterventions={reinterventions} /></div>
