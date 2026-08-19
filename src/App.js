@@ -12075,6 +12075,27 @@ function PlanImplantation({ seuilsGlobaux }) {
   const [showAllPlans, setShowAllPlans] = useState(false);
   const [selDate, setSelDate]         = useState(null);
   const [filterNuisibleArr, setFilterNuisibleArr] = useState([]);
+  const [filterProduitNu, setFilterProduitNu] = useState("tous");   // tous | oui | non
+  const [filterNaturePlan, setFilterNaturePlan] = useState("toutes"); // toutes | Destructeur | Monitoring
+  const [filterMacroPlan, setFilterMacroPlan]   = useState("Toutes");
+  // Un poste est visible sur le plan s il passe TOUS les filtres (cumulables).
+  function posteVisiblePlan(p) {
+    if (!p) return false;
+    if (p.statut==="Désactivé") return false;
+    if (filterProduitNu==="oui" && !p.produit_nu) return false;
+    if (filterProduitNu==="non" && p.produit_nu) return false;
+    if (filterNaturePlan!=="toutes") {
+      const estDeiv = (p.type==="DEIV")||((p.nuisible||"")==="Insectes volants");
+      if (!estDeiv || (p.nature||"")!==filterNaturePlan) return false;
+    }
+    if (filterMacroPlan!=="Toutes" && (p.macro||"")!==filterMacroPlan) return false;
+    if (filterNuisibleArr.length>0) {
+      const nuisible = p.nuisible||"Rongeurs";
+      const ok = filterNuisibleArr.some(f=>{ if(f==="__RE")return posteEstExt(p); if(f==="__RI")return posteEstInt(p); return nuisible===f; });
+      if (!ok) return false;
+    }
+    return true;
+  }
   const [modeColor, setModeColor]     = useState("type");
   const [zoom, setZoom]               = useState(()=>{
     try { const saved = window.localStorage && window.localStorage.getItem("aads_plan_zoom"); return saved ? parseInt(saved) : 80; } catch(e) { return 80; }
@@ -12468,15 +12489,9 @@ function PlanImplantation({ seuilsGlobaux }) {
   // mais conserves en base (leur position n est pas supprimee).
   const postesNonDesactives = postes.filter(p => p.statut !== "Désactivé");
   const planPostes = getPts(activePlan).filter(pt => (pt.page||0) === activePage);
-  const filteredPostes = filterNuisibleArr.length===0 ? postesNonDesactives : postesNonDesactives.filter(p => {
-    const nuisible = p.nuisible||"Rongeurs";
-    const id = p.id||"";
-    return filterNuisibleArr.some(f => {
-      if (f === "__RE") return posteEstExt(p);
-      if (f === "__RI") return posteEstInt(p);
-      return nuisible === f;
-    });
-  });
+  // Liste "a placer" : memes filtres cumulables que les pastilles.
+  const filteredPostes = postesNonDesactives.filter(p => posteVisiblePlan(p));
+  const macrosPlan = ["Toutes", ...Array.from(new Set(postesNonDesactives.map(p=>p.macro).filter(Boolean)))];
 
   // KPIs for selected date
   const kpi = selDate ? getPassageStats(selDate) : {tot:0, part:0, ok:postesNonDesactives.length, total:postesNonDesactives.length};
@@ -12970,6 +12985,38 @@ function PlanImplantation({ seuilsGlobaux }) {
         ))}
       </div>
 
+      {/* Filtres supplementaires : produit nu, nature DEIV, macro-zone (cumulables avec le nuisible) */}
+      <Card style={{marginBottom:14,padding:"12px 16px"}}>
+        <div style={{fontSize:10,fontWeight:700,color:"#7a90aa",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Filtres d affichage</div>
+        <div style={{display:"flex",gap:14,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div>
+            <div style={{fontSize:9,color:"#7a90aa",marginBottom:3}}>Produit nu</div>
+            <div style={{display:"flex",gap:5}}>
+              {[["tous","Tous"],["oui","En zone produit nu"],["non","Hors produit nu"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setFilterProduitNu(v)}
+                  style={{background:filterProduitNu===v?"#22c55e22":"transparent",color:filterProduitNu===v?"#22c55e":"#7a90aa",border:"1px solid "+(filterProduitNu===v?"#22c55e":"#3d5270"),borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:filterProduitNu===v?700:500,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#7a90aa",marginBottom:3}}>DEIV — nature</div>
+            <div style={{display:"flex",gap:5}}>
+              {[["toutes","Tous"],["Destructeur","Destructeur"],["Monitoring","Monitoring"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setFilterNaturePlan(v)}
+                  style={{background:filterNaturePlan===v?"#c084fc22":"transparent",color:filterNaturePlan===v?"#c084fc":"#7a90aa",border:"1px solid "+(filterNaturePlan===v?"#c084fc":"#3d5270"),borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:filterNaturePlan===v?700:500,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:9,color:"#7a90aa",marginBottom:3}}>Zone macro</div>
+            <select value={filterMacroPlan} onChange={e=>setFilterMacroPlan(e.target.value)}
+              style={{background:"#243352",border:"1px solid #3d5270",borderRadius:7,padding:"5px 10px",color:"#f1f5f9",fontSize:11,fontFamily:"inherit"}}>
+              {macrosPlan.map(m=><option key={m} value={m}>{m==="Toutes"?"Toutes les zones":m}</option>)}
+            </select>
+          </div>
+        </div>
+      </Card>
+
       {/* Filtre nuisible */}
       <Card style={{marginBottom:14,padding:"12px 16px"}}>
         <div style={{fontSize:10,fontWeight:700,color:"#7a90aa",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Filtrer par nuisible (selection multiple)</div>
@@ -13442,8 +13489,7 @@ function PlanImplantation({ seuilsGlobaux }) {
             {planPostes.map(pt=>{
               const p=postes.find(p=>p.id===pt.id);
               if(!p)return null;
-              if(p.statut==="Désactivé")return null;   // poste desactive : masque du plan (position conservee en base)
-              if(filterNuisibleArr.length>0&&!filterNuisibleArr.some(f=>{if(f==="__RE")return posteEstExt(p);if(f==="__RI")return posteEstInt(p);return (p.nuisible||"Rongeurs")===f;}))return null;
+              if(!posteVisiblePlan(p))return null;   // filtres cumulables : desactive, produit nu, nature DEIV, macro, nuisible
               const col=getPosteColor(p,selDate);
               const isHov=hover===pt.id;
               const isMov=movingPoste===pt.id;
