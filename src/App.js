@@ -12842,7 +12842,7 @@ function PlanImplantation({ seuilsGlobaux }) {
       pts.forEach(pt => {
         const p = postes.find(x=>x.id===pt.id);
         if (!p) return;
-        if (filterNuisibleArr.length>0 && !filterNuisibleArr.some(f=>{if(f==="__RE")return posteEstExt(p);if(f==="__RI")return posteEstInt(p);return (p.nuisible||"Rongeurs")===f;})) return;
+        if (!posteVisiblePlan(p)) return;   // filtres cumulables (nuisible, produit nu, nature, macro, desactive)
         const col = getPosteColor(p, selDate);
         const x = (parseFloat(pt.x)/100) * 900;
         const y = (parseFloat(pt.y)/100) * 600;
@@ -12926,7 +12926,7 @@ function PlanImplantation({ seuilsGlobaux }) {
       pts.forEach(pt => {
         const p = postes.find(x=>x.id===pt.id);
         if (!p) return;
-        if (filterNuisibleArr.length>0 && !filterNuisibleArr.some(f=>{if(f==="__RE")return posteEstExt(p);if(f==="__RI")return posteEstInt(p);return (p.nuisible||"Rongeurs")===f;})) return;
+        if (!posteVisiblePlan(p)) return;   // filtres cumulables (nuisible, produit nu, nature, macro, desactive)
         const col = getPosteColor(p, selDate);
         const x = (parseFloat(pt.x)/100) * img.width;
         const y = (parseFloat(pt.y)/100) * img.height;
