@@ -2182,7 +2182,9 @@ function Cartographie({ seuilsGlobaux }) {
               const appat = (displaySel.appat || "").toLowerCase();
               const nuisible = (displaySel.nuisible || "Rongeurs");
               const isPlaceboToxique = appat === "placebo" || appat === "toxique";
-              const isGlueRongeur = (appat === "glue") && nuisible === "Rongeurs";
+              // Tout dispositif de capture (glu, mecanique, multicapture, electrique, grille...)
+              // ouvre la saisie en NOMBRE DE CAPTURES. Placebo/Toxique restent en consommation.
+              const isGlueRongeur = nuisible === "Rongeurs" && appat !== "" && !isPlaceboToxique;
               const c = estConsoTotale(val) ? "#ef4444" : estConsoPartielle(val) ? "#f59e0b" : "#22c55e";
               return (
                 <div key={d} style={{ background: "#1a2540", borderRadius: 8, padding: "8px 12px", borderLeft: "3px solid " + c, marginBottom: 6 }} onClick={e => e.stopPropagation()}>
@@ -11156,12 +11158,16 @@ function GestionPostes({ postes, setPostes }) {
   const [newMacroInput, setNewMacroInput] = useState("");
   const [typesList, setTypesList] = useState(()=>{ try { const s = window.localStorage.getItem("aads_types_list"); const a = s?JSON.parse(s):null; return (Array.isArray(a)&&a.length)?a:["RE","RI","DEIV","PIV","PC","Autre"]; } catch(e) { return ["RE","RI","DEIV","PIV","PC","Autre"]; } });
   const [newTypeInput, setNewTypeInput] = useState("");
+  const APPATS_DEFAUT = ["Placebo","Toxique","Capture mécanique","Capture glu","Multicapture","Electrique"];
+  const [appatsList, setAppatsList] = useState(()=>{ try { const s = window.localStorage.getItem("aads_appats_list"); const a = s?JSON.parse(s):null; return (Array.isArray(a)&&a.length)?a:APPATS_DEFAUT; } catch(e) { return APPATS_DEFAUT; } });
+  const [newAppatInput, setNewAppatInput] = useState("");
+  useEffect(()=>{ try { window.localStorage.setItem("aads_appats_list", JSON.stringify(appatsList)); } catch(e) {} }, [appatsList]);
   const [showManageLists, setShowManageLists] = useState(false);
   useEffect(()=>{ try { window.localStorage.setItem("aads_macros_list", JSON.stringify(macrosList)); } catch(e) {} }, [macrosList]);
   useEffect(()=>{ try { window.localStorage.setItem("aads_types_list", JSON.stringify(typesList)); } catch(e) {} }, [typesList]);
   // Persistance en base (partagee entre appareils/techniciens) des listes macro/types.
-  function saveListesPostes(macros, types) {
-    var payload = { macros: macros, types: types };
+  function saveListesPostes(macros, types, appats) {
+    var payload = { macros: macros, types: types, appats: (appats || appatsList) };
     sbFetch("config_logos?id=eq.main", "PATCH", { listes_postes: payload }, { Prefer:"return=representation" })
       .then(function(r){ if (!r || (Array.isArray(r) && r.length === 0)) { sbFetch("config_logos", "POST", { id:"main", listes_postes: payload }, { Prefer:"resolution=merge-duplicates" }).catch(function(){}); } })
       .catch(function(){});
@@ -11172,9 +11178,20 @@ function GestionPostes({ postes, setPostes }) {
         var lp = data[0].listes_postes;
         if (lp && Array.isArray(lp.macros) && lp.macros.length) { setMacrosList(lp.macros); try { window.localStorage.setItem("aads_macros_list", JSON.stringify(lp.macros)); } catch(e){} }
         if (lp && Array.isArray(lp.types) && lp.types.length) { setTypesList(lp.types); try { window.localStorage.setItem("aads_types_list", JSON.stringify(lp.types)); } catch(e){} }
+        if (lp && Array.isArray(lp.appats) && lp.appats.length) { setAppatsList(lp.appats); try { window.localStorage.setItem("aads_appats_list", JSON.stringify(lp.appats)); } catch(e){} }
       }
     }).catch(function(){});
   }, []);
+  function addAppat(value) {
+    const v = (value||"").trim();
+    if (!v || appatsList.includes(v)) { setNewAppatInput(""); return; }
+    const next = [...appatsList, v];
+    setAppatsList(next); saveListesPostes(macrosList, typesList, next); setNewAppatInput("");
+  }
+  function removeAppat(v) {
+    const next = appatsList.filter(a=>a!==v);
+    setAppatsList(next); saveListesPostes(macrosList, typesList, next);
+  }
 
   function addMacro(value, applyTo) {
     const v = value.trim();
@@ -11218,8 +11235,12 @@ function GestionPostes({ postes, setPostes }) {
   function startEdit(p) { setEditId(p.id); setEditData({...p}); }
   function saveEdit() {
     setPrevPostes(postes);
-    setPostes(prev=>prev.map(p=>p.id===editId?{...editData}:p));
-    sbUpdate("postes",editId,editData);
+    setPostes(prev=>prev.map(p=>p.id===editId?{...p, ...editData}:p));
+    // On n envoie que les colonnes reelles de la table (evite un 400 sur un champ calcule).
+    const clean = { id:editData.id, zone:editData.zone||"", macro:editData.macro||"", type:editData.type||"",
+      nuisible:editData.nuisible||"Rongeurs", appat:editData.appat||"", statut:editData.statut||"Actif",
+      produit_nu:!!editData.produit_nu, nature:editData.nature||"" };
+    sbUpdate("postes",editId,clean);
     setEditId(null);
   }
   function deletePoste(id) {
@@ -11334,6 +11355,21 @@ function GestionPostes({ postes, setPostes }) {
                 <button onClick={()=>addType(newTypeInput)} style={{background:"#22c55e",color:"#fff",border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+</button>
               </div>
             </div>
+            <div>
+              <div style={{fontSize:10,color:"#22c55e",fontWeight:700,marginBottom:6,textTransform:"uppercase"}}>Capture / appâts</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8}}>
+                {appatsList.map(a=>(
+                  <span key={a} style={{display:"flex",alignItems:"center",gap:4,background:"#243352",border:"1px solid #3d5270",borderRadius:6,padding:"3px 8px",fontSize:11,color:"#f1f5f9"}}>
+                    {a}
+                    <button onClick={()=>removeAppat(a)} style={{background:"transparent",border:"none",color:"#ef4444",cursor:"pointer",fontSize:10,padding:0,lineHeight:1}}>✕</button>
+                  </span>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:4}}>
+                <input value={newAppatInput} onChange={e=>setNewAppatInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){addAppat(newAppatInput);}}} placeholder="Nouvel appât / capture..." style={{...inpS,flex:1}}/>
+                <button onClick={()=>addAppat(newAppatInput)} style={{background:"#22c55e",color:"#fff",border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+</button>
+              </div>
+            </div>
           </div>
         </Card>
       )}
@@ -11358,7 +11394,19 @@ function GestionPostes({ postes, setPostes }) {
             </div>
             <div><label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:2}}>Nuisible</label>
               <select value={newP.nuisible} onChange={e=>setNewP(p=>({...p,nuisible:e.target.value}))} style={inpS}>{NUISIBLES_P.map(n=><option key={n}>{n}</option>)}</select></div>
-            <div><label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:2}}>Appât</label><input value={newP.appat} onChange={e=>setNewP(p=>({...p,appat:e.target.value}))} style={inpS}/></div>
+            <div><label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:2}}>Capture / appât</label>
+              <select value={newP.appat||""} onChange={e=>setNewP(p=>({...p,appat:e.target.value}))} style={inpS}>
+                <option value="">—</option>
+                {appatsList.map(a=><option key={a} value={a}>{a}</option>)}
+              </select></div>
+            <div><label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:2}}>Produit nu</label>
+              <div style={{padding:"5px 0"}}><input type="checkbox" checked={!!newP.produit_nu} onChange={e=>setNewP(p=>({...p,produit_nu:e.target.checked}))} style={{width:16,height:16,cursor:"pointer"}}/></div></div>
+            {((newP.type==="DEIV")||(newP.nuisible==="Insectes volants")) && (
+              <div><label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:2}}>Nature (DEIV)</label>
+                <select value={newP.nature||""} onChange={e=>setNewP(p=>({...p,nature:e.target.value}))} style={inpS}>
+                  <option value="">—</option><option value="Destructeur">Destructeur</option><option value="Monitoring">Monitoring</option>
+                </select></div>
+            )}
             <div><label style={{fontSize:9,color:"#7a90aa",display:"block",marginBottom:2}}>Statut</label><select value={newP.statut||"Actif"} onChange={e=>setNewP(p=>({...p,statut:e.target.value}))} style={inpS}>{STATUTS_POSTES.map(s=><option key={s}>{s}</option>)}</select></div>
           </div>
           <div style={{display:"flex",gap:6}}>
@@ -11378,8 +11426,8 @@ function GestionPostes({ postes, setPostes }) {
       </div>
       <div style={{fontSize:10,color:"#5a7090",marginBottom:6,fontStyle:"italic"}}>{reorderActif ? "Glisser une ligne pour reordonner les postes. L ordre est enregistre pour tous." : "Retire la recherche et le filtre nuisible pour pouvoir reordonner par glisser-deposer."}</div>
       <Card style={{padding:0,overflow:"hidden"}}>
-        <div style={{background:"#1a2540",padding:"8px 14px",display:"grid",gridTemplateColumns:"70px 1fr 110px 70px 80px 70px 80px 80px",gap:8,fontSize:9,fontWeight:700,color:"#7a90aa",textTransform:"uppercase"}}>
-          <div>N°</div><div>Zone</div><div>Macro</div><div>Type</div><div>Nuisible</div><div>Capture</div><div>Statut</div><div>Actions</div>
+        <div style={{background:"#1a2540",padding:"8px 14px",display:"grid",gridTemplateColumns:"64px 1fr 88px 52px 74px 104px 58px 86px 70px 66px",gap:8,fontSize:9,fontWeight:700,color:"#7a90aa",textTransform:"uppercase"}}>
+          <div>N°</div><div>Zone</div><div>Macro</div><div>Type</div><div>Nuisible</div><div>Capture</div><div>Produit nu</div><div>Nature</div><div>Statut</div><div>Actions</div>
         </div>
         <div style={{maxHeight:400,overflowY:"auto"}}>
           {filtered.map((p,i)=>(
@@ -11390,7 +11438,7 @@ function GestionPostes({ postes, setPostes }) {
               onDragLeave={()=>{ if(dragOverId===p.id) setDragOverId(null); }}
               onDrop={e=>{ e.preventDefault(); onDropReorder(p.id); }}
               onDragEnd={()=>{ dragId.current=null; setDragOverId(null); }}
-              style={{padding:"7px 14px",display:"grid",gridTemplateColumns:"70px 1fr 110px 70px 80px 70px 80px 80px",gap:8,alignItems:"center",borderTop:dragOverId===p.id?"2px solid #3b82f6":"1px solid #243352",background:dragOverId===p.id?"#1d4ed822":(i%2===0?"transparent":"#ffffff04"),cursor:(reorderActif && editId!==p.id)?"grab":"default"}}>
+              style={{padding:"7px 14px",display:"grid",gridTemplateColumns:"64px 1fr 88px 52px 74px 104px 58px 86px 70px 66px",gap:8,alignItems:"center",borderTop:dragOverId===p.id?"2px solid #3b82f6":"1px solid #243352",background:dragOverId===p.id?"#1d4ed822":(i%2===0?"transparent":"#ffffff04"),cursor:(reorderActif && editId!==p.id)?"grab":"default"}}>
               {editId===p.id ? (
                 <>
                   <input value={editData.id} onChange={e=>setEditData(d=>({...d,id:e.target.value}))} style={{...inpS,width:"100%"}}/>
@@ -11400,12 +11448,19 @@ function GestionPostes({ postes, setPostes }) {
                   <select value={editData.nuisible||""} onChange={e=>setEditData(d=>({...d,nuisible:e.target.value}))} style={inpS}>{NUISIBLES_P.map(n=><option key={n}>{n}</option>)}</select>
                   <select value={editData.appat||""} onChange={e=>setEditData(d=>({...d,appat:e.target.value}))} style={inpS}>
                     <option value="">—</option>
-                    <option value="Glue">Glue</option>
-                    <option value="Grille">Grille</option>
-                    <option value="Toxique">Toxique</option>
-                    <option value="Lumiere">Lumiere</option>
-                    <option value="Autre">Autre</option>
+                    {appatsList.map(a=><option key={a} value={a}>{a}</option>)}
+                    {editData.appat && !appatsList.includes(editData.appat) && <option value={editData.appat}>{editData.appat}</option>}
                   </select>
+                  <div style={{display:"flex",justifyContent:"center"}}>
+                    <input type="checkbox" checked={!!editData.produit_nu} onChange={e=>setEditData(d=>({...d,produit_nu:e.target.checked}))} style={{width:16,height:16,cursor:"pointer"}}/>
+                  </div>
+                  {((editData.type==="DEIV")||(editData.nuisible==="Insectes volants")) ? (
+                    <select value={editData.nature||""} onChange={e=>setEditData(d=>({...d,nature:e.target.value}))} style={inpS}>
+                      <option value="">—</option>
+                      <option value="Destructeur">Destructeur</option>
+                      <option value="Monitoring">Monitoring</option>
+                    </select>
+                  ) : <div style={{fontSize:10,color:"#5a7090",textAlign:"center"}}>—</div>}
                   <select value={editData.statut||"Actif"} onChange={e=>setEditData(d=>({...d,statut:e.target.value}))} style={inpS}>{STATUTS_POSTES.map(s=><option key={s}>{s}</option>)}</select>
                   <div style={{display:"flex",gap:4}}>
                     <button onClick={saveEdit} style={{background:"#22c55e",color:"#fff",border:"none",borderRadius:5,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>OK</button>
@@ -11420,6 +11475,8 @@ function GestionPostes({ postes, setPostes }) {
                   <div style={{fontSize:10,color:"#7a90aa"}}>{p.type}</div>
                   <div style={{fontSize:10,color:NUISIBLE_COLORS[p.nuisible||"Rongeurs"]||"#7a90aa",fontWeight:600}}>{p.nuisible||"Rongeurs"}</div>
                   <div style={{fontSize:10,color:p.appat?"#f1f5f9":"#5a7090"}}>{p.appat||"—"}</div>
+                  <div style={{textAlign:"center",fontSize:12,color:p.produit_nu?"#22c55e":"#5a7090",fontWeight:700}}>{p.produit_nu?"✓":"—"}</div>
+                  <div style={{fontSize:10,color:p.nature?"#c084fc":"#5a7090"}}>{((p.type==="DEIV")||(p.nuisible==="Insectes volants"))?(p.nature||"—"):"—"}</div>
                   <div style={{fontSize:10,color:p.statut==="Actif"||!p.statut?"#22c55e":p.statut==="Disparu"?"#ef4444":"#f59e0b",fontWeight:600}}>{p.statut||"Actif"}</div>
                   <div style={{display:"flex",gap:4}}>
                     <button onClick={()=>startEdit(p)} style={{background:"#1d4ed822",color:"#3b82f6",border:"1px solid #3b82f644",borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Edit</button>
