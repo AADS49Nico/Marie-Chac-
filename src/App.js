@@ -5206,6 +5206,9 @@ function DeivParAppareilChart({ passages, postes }) {
   const maxAuto = Math.max(5, Math.ceil(maxDonnees*1.25/5)*5);
   const maxVal = echelle === "manuel" ? Math.max(1, parseInt(maxManuel)||10) : maxAuto;
   function xPos(i) { return PAD + (stats.length > 1 ? i/(stats.length-1)*(W-PAD*2) : (W-PAD*2)/2); }
+  // Multi-annees : on positionne par MOIS (0-11) et non par index, sinon le dernier
+  // point de chaque annee tombe au meme X (ex: juillet 2026 sur decembre 2025).
+  function xMoisDate(dstr){ const d=pd(dstr); const m=(d&&!isNaN(d))?d.getMonth():0; return PAD + (m/11)*(W-PAD*2); }
   function yVal(v) { return H - PAD - (Math.min(v,maxVal)/maxVal)*(H-PAD*2); }
   const inpStyle = { background:"#243352", border:"1px solid #3d5270", borderRadius:7, padding:"6px 10px", color:"#f1f5f9", fontSize:11, fontFamily:"inherit" };
 
@@ -5221,8 +5224,8 @@ function DeivParAppareilChart({ passages, postes }) {
     if (statsParAnnee.length > 1) {
       chartBody = statsParAnnee.map(function(sa){
         if (sa.stats.length < 1) return "";
-        const pts = sa.stats.map(function(s,i){ const x = sa.stats.length>1?PAD2+i/(sa.stats.length-1)*(W2-PAD2*2):W2/2; return x+","+yVal2(s.total); }).join(" ");
-        const circles = sa.stats.map(function(s,i){ const x=sa.stats.length>1?PAD2+i/(sa.stats.length-1)*(W2-PAD2*2):W2/2; const y=yVal2(s.total); return "<circle cx='"+x+"' cy='"+y+"' r='4' fill='"+sa.color+"'/>"+(s.total>0?"<text x='"+x+"' y='"+(y-9)+"' font-size='8' fill='"+sa.color+"' text-anchor='middle'>"+s.total+"</text>":""); }).join("");
+        const pts = sa.stats.map(function(s,i){ const x = xMoisDate(s.date); return x+","+yVal2(s.total); }).join(" ");
+        const circles = sa.stats.map(function(s,i){ const x=xMoisDate(s.date); const y=yVal2(s.total); return "<circle cx='"+x+"' cy='"+y+"' r='4' fill='"+sa.color+"'/>"+(s.total>0?"<text x='"+x+"' y='"+(y-9)+"' font-size='8' fill='"+sa.color+"' text-anchor='middle'>"+s.total+"</text>":""); }).join("");
         return (sa.stats.length>1?"<polyline points='"+pts+"' fill='none' stroke='"+sa.color+"' stroke-width='2'/>":"")+circles;
       }).join("");
     } else {
@@ -5390,10 +5393,10 @@ function DeivParAppareilChart({ passages, postes }) {
         })()}
         {statsParAnnee.length > 1 ? statsParAnnee.map((sa,ai)=>{
           if(sa.stats.length < 1) return null;
-          const poly = sa.stats.map((s,i)=>{ const x=sa.stats.length>1?PAD+i/(sa.stats.length-1)*(W-PAD*2):W/2; return x+","+yVal(s.total); }).join(" ");
+          const poly = sa.stats.map((s,i)=>{ const x=xMoisDate(s.date); return x+","+yVal(s.total); }).join(" ");
           return (<g key={sa.annee}>
             {sa.stats.length>1&&<polyline points={poly} fill="none" stroke={sa.color} strokeWidth="2.5" strokeLinejoin="round"/>}
-            {sa.stats.map((s,i)=>{ const x=sa.stats.length>1?PAD+i/(sa.stats.length-1)*(W-PAD*2):W/2; return (<g key={i}><circle cx={x} cy={yVal(s.total)} r="4" fill={sa.color} stroke="#1a2540" strokeWidth="2"/>{s.total>0&&<text x={x} y={yVal(s.total)-9} fontSize="8" fill={sa.color} textAnchor="middle">{s.total}</text>}{ai===0&&<text x={x} y={H-8} fontSize="8" fill="#5a7090" textAnchor="middle" transform={"rotate(-30 "+x+" "+(H-8)+")"}>{(s.date||"").slice(0,5)}</text>}</g>); })}
+            {sa.stats.map((s,i)=>{ const x=xMoisDate(s.date); return (<g key={i}><circle cx={x} cy={yVal(s.total)} r="4" fill={sa.color} stroke="#1a2540" strokeWidth="2"/>{s.total>0&&<text x={x} y={yVal(s.total)-9} fontSize="8" fill={sa.color} textAnchor="middle">{s.total}</text>}{ai===0&&<text x={x} y={H-8} fontSize="8" fill="#5a7090" textAnchor="middle" transform={"rotate(-30 "+x+" "+(H-8)+")"}>{(s.date||"").slice(0,5)}</text>}</g>); })}
           </g>);
         }) : (<g>
           {stats.length>1&&<polyline points={stats.map((s,i)=>xPos(i)+","+yVal(s.total)).join(" ")} fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinejoin="round"/>}
