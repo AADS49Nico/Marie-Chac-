@@ -12119,7 +12119,7 @@ function PlanImplantation({ seuilsGlobaux }) {
   const [filterNuisibleArr, setFilterNuisibleArr] = useState([]);
   const [filterProduitNu, setFilterProduitNu] = useState("tous");   // tous | oui | non
   const [filterNaturePlan, setFilterNaturePlan] = useState("toutes"); // toutes | Destructeur | Monitoring
-  const [filterMacroPlan, setFilterMacroPlan]   = useState("Toutes");
+  const [filterMacroPlan, setFilterMacroPlan]   = useState([]); // [] = toutes les zones ; sinon liste de macros
   // Un poste est visible sur le plan s il passe TOUS les filtres (cumulables).
   function posteVisiblePlan(p) {
     if (!p) return false;
@@ -12130,7 +12130,7 @@ function PlanImplantation({ seuilsGlobaux }) {
       const estDeiv = (p.type==="DEIV")||((p.nuisible||"")==="Insectes volants");
       if (!estDeiv || (p.nature||"")!==filterNaturePlan) return false;
     }
-    if (filterMacroPlan!=="Toutes" && (p.macro||"")!==filterMacroPlan) return false;
+    if (filterMacroPlan.length>0 && filterMacroPlan.indexOf(p.macro||"")===-1) return false;
     if (filterNuisibleArr.length>0) {
       const nuisible = p.nuisible||"Rongeurs";
       const ok = filterNuisibleArr.some(f=>{ if(f==="__RE")return posteEstExt(p); if(f==="__RI")return posteEstInt(p); return nuisible===f; });
@@ -12997,25 +12997,7 @@ function PlanImplantation({ seuilsGlobaux }) {
         </Card>
       )}
 
-      {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
-        <div style={{background:"#243352",borderRadius:10,padding:"14px 18px",textAlign:"center"}}>
-          <div style={{fontSize:26,fontWeight:900,color:"#3b82f6"}}>{selDate ? kpi.total : postesNonDesactives.length}</div>
-          <div style={{fontSize:11,color:"#7a90aa",marginTop:2}}>{selDate ? "Postes contrôlés" : "Postes"}</div>
-        </div>
-        <div style={{background:"#243352",borderRadius:10,padding:"14px 18px",textAlign:"center"}}>
-          <div style={{fontSize:26,fontWeight:900,color:"#ef4444"}}>{kpi.tot}</div>
-          <div style={{fontSize:11,color:"#7a90aa",marginTop:2}}>Conso. totale</div>
-        </div>
-        <div style={{background:"#243352",borderRadius:10,padding:"14px 18px",textAlign:"center"}}>
-          <div style={{fontSize:26,fontWeight:900,color:"#f59e0b"}}>{kpi.part}</div>
-          <div style={{fontSize:11,color:"#7a90aa",marginTop:2}}>Conso. partielle</div>
-        </div>
-        <div style={{background:"#243352",borderRadius:10,padding:"14px 18px",textAlign:"center"}}>
-          <div style={{fontSize:26,fontWeight:900,color:"#22c55e"}}>{kpi.ok}</div>
-          <div style={{fontSize:11,color:"#7a90aa",marginTop:2}}>Sans activité</div>
-        </div>
-      </div>
+      {/* KPIs retires du plan d implantation a la demande */}
 
       {/* Mode couleur */}
       <div style={{display:"flex",gap:6,marginBottom:12}}>
@@ -13050,11 +13032,16 @@ function PlanImplantation({ seuilsGlobaux }) {
             </div>
           </div>
           <div>
-            <div style={{fontSize:9,color:"#7a90aa",marginBottom:3}}>Zone macro</div>
-            <select value={filterMacroPlan} onChange={e=>setFilterMacroPlan(e.target.value)}
-              style={{background:"#243352",border:"1px solid #3d5270",borderRadius:7,padding:"5px 10px",color:"#f1f5f9",fontSize:11,fontFamily:"inherit"}}>
-              {macrosPlan.map(m=><option key={m} value={m}>{m==="Toutes"?"Toutes les zones":m}</option>)}
-            </select>
+            <div style={{fontSize:9,color:"#7a90aa",marginBottom:3}}>Zone macro (sélection multiple)</div>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              <button onClick={()=>setFilterMacroPlan([])}
+                style={{background:filterMacroPlan.length===0?"#3b82f622":"transparent",color:filterMacroPlan.length===0?"#3b82f6":"#7a90aa",border:"1px solid "+(filterMacroPlan.length===0?"#3b82f6":"#3d5270"),borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:filterMacroPlan.length===0?700:500,cursor:"pointer",fontFamily:"inherit"}}>Toutes</button>
+              {macrosPlan.filter(m=>m!=="Toutes").map(m=>{
+                const on = filterMacroPlan.indexOf(m)>=0;
+                return <button key={m} onClick={()=>setFilterMacroPlan(prev=>on?prev.filter(x=>x!==m):[...prev,m])}
+                  style={{background:on?"#3b82f622":"transparent",color:on?"#3b82f6":"#7a90aa",border:"1px solid "+(on?"#3b82f6":"#3d5270"),borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:on?700:500,cursor:"pointer",fontFamily:"inherit"}}>{m}</button>;
+              })}
+            </div>
           </div>
         </div>
       </Card>
