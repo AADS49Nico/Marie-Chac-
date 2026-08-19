@@ -8729,7 +8729,7 @@ function Habilitations() {
 
   useEffect(() => {
     Promise.all([
-      sbGet("habilitations").catch(()=>[]),
+      sbGet("habilitations").catch(()=>null),   // null = echec (≠ liste vide) : on ne re-amorce pas sur un echec
       sbFetch("config_logos?id=eq.main","GET").catch(()=>[]),
     ]).then(([data, cfg]) => {
       var hc = (cfg && cfg[0] && cfg[0].hab_config) || null;
@@ -8749,8 +8749,11 @@ function Habilitations() {
             setTechniciens(data.map(h=>({...h, equipe:h.equipe||"3d"})));
           }
         } catch(e) { setTechniciens(data.map(h=>({...h, equipe:h.equipe||"3d"}))); }
-      } else {
-        HABILITATIONS.forEach(h => sbUpsert("habilitations", { id:String(h.id), contrat:CLIENT_CONFIG.contrat, nom:h.nom, role:h.role, actif:h.actif, certiphyto:h.certiphyto, certibiocide:h.certibiocide, hab_elec:h.habElec||false, caces:h.caces, pack_sec:h.packSec||false, telephone:h.telephone||"", email:h.email||"", equipe:"3d" }));
+      } else if (Array.isArray(data) && CLIENT_CONFIG.contrat) {
+        // Ré-amorcer UNIQUEMENT si la base est reellement vide (data === [] et non un
+        // echec de chargement) ET que le contrat est resolu : sinon on ecraserait
+        // tous les techniciens existants. On respecte l equipe par defaut.
+        HABILITATIONS.forEach(h => sbUpsert("habilitations", { id:String(h.id), contrat:CLIENT_CONFIG.contrat, nom:h.nom, role:h.role, actif:h.actif, certiphyto:h.certiphyto, certibiocide:h.certibiocide, hab_elec:h.habElec||false, caces:h.caces, pack_sec:h.packSec||false, telephone:h.telephone||"", email:h.email||"", equipe:h.equipe||"3d" }));
       }
       habLoadedRef.current = true;
     }).catch(()=>{ habLoadedRef.current = true; });
