@@ -12200,6 +12200,8 @@ function PlanImplantation({ seuilsGlobaux }) {
   const [showAllPlans, setShowAllPlans] = useState(false);
   const [selDate, setSelDate]         = useState(null);
   const [filterNuisibleArr, setFilterNuisibleArr] = useState([]);
+  const [imgReflow, setImgReflow] = useState(0);   // force un recalcul des pastilles quand l image est chargee
+  const planScrollRef = React.useRef(null);        // conteneur defilant du plan (reset scroll au chargement)
   const [filterProduitNu, setFilterProduitNu] = useState("tous");   // tous | oui | non
   const [filterNaturePlan, setFilterNaturePlan] = useState("toutes"); // toutes | Destructeur | Monitoring
   const [filterMacroPlan, setFilterMacroPlan]   = useState([]); // [] = toutes les zones ; sinon liste de macros
@@ -12614,6 +12616,9 @@ function PlanImplantation({ seuilsGlobaux }) {
   // mais conserves en base (leur position n est pas supprimee).
   const postesNonDesactives = postes.filter(p => p.statut !== "Désactivé");
   const planPostes = getPts(activePlan).filter(pt => (pt.page||0) === activePage);
+  // Au chargement / changement de plan ou d etage : remet le defilement horizontal a 0
+  // (evite que le plan apparaisse decale a gauche/droite tant qu on n a pas interagi).
+  useEffect(()=>{ if(planScrollRef.current) planScrollRef.current.scrollLeft = 0; }, [activePlan, activePage, imgReflow]);
   // Liste "a placer" : memes filtres cumulables que les pastilles.
   const filteredPostes = postesNonDesactives.filter(p => posteVisiblePlan(p));
   const macrosPlan = ["Toutes", ...Array.from(new Set(postesNonDesactives.map(p=>p.macro).filter(Boolean)))];
@@ -13573,12 +13578,12 @@ function PlanImplantation({ seuilsGlobaux }) {
           </div>
         )}
         {/* Plan image */}
-        <div style={{overflowX:"auto",overflowY:"visible"}}>
+        <div ref={planScrollRef} style={{overflowX:"auto",overflowY:"visible"}}>
           <div id="plan-export-zone"
             style={{position:"relative",width:zoom+"%",minWidth:600,cursor:placingPoste||movingPoste?"crosshair":"default"}}
             onClick={handlePlanClick}>
             {planImagesArr[activePage]
-              ? <img src={planImagesArr[activePage].url} alt={(activePlanData&&activePlanData.label)} style={{width:"100%",display:"block",userSelect:"none"}} draggable={false}/>
+              ? <img src={planImagesArr[activePage].url} alt={(activePlanData&&activePlanData.label)} style={{width:"100%",display:"block",userSelect:"none"}} draggable={false} onLoad={()=>setImgReflow(v=>v+1)}/>
               : activePlanData&&activePlanData.dessine
               ? <svg viewBox="0 0 900 600" style={{width:"100%",display:"block",background:"#fff"}}>
                   {activePlanData.backgroundImg && <image href={activePlanData.backgroundImg} x="0" y="0" width="900" height="600" preserveAspectRatio="xMidYMid meet"/>}
