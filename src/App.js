@@ -14270,6 +14270,41 @@ function AuditObservationsParZoneChart({ audits }) {
 }
 
 // ============================================================
+// Compresse/redimensionne une image avant stockage (base64). Les photos prises
+// au telephone font plusieurs Mo : sans ca, un audit avec photos devient trop
+// lourd et l'enregistrement echoue. Resultat : JPEG max ~1400px, qualite ~0.6
+// (~100-250 Ko). Les non-images (PDF) et les cas d'echec gardent l'original.
+function compressImageFile(file, maxDim, quality) {
+  return new Promise(function(resolve, reject){
+    try {
+      var fr = new FileReader();
+      fr.onerror = function(){ reject(new Error("read error")); };
+      if (!file || !/^image\//.test(file.type || "")) {
+        fr.onload = function(e){ resolve(e.target.result); };
+        fr.readAsDataURL(file); return;
+      }
+      fr.onload = function(e){
+        var orig = e.target.result;
+        var img = new Image();
+        img.onload = function(){
+          try {
+            var w = img.width, h = img.height, m = maxDim || 1400;
+            if (w > m || h > m) { if (w >= h) { h = Math.round(h * m / w); w = m; } else { w = Math.round(w * m / h); h = m; } }
+            var canvas = document.createElement("canvas");
+            canvas.width = w; canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            var out = canvas.toDataURL("image/jpeg", quality || 0.6);
+            resolve(out && out.length < orig.length ? out : orig);
+          } catch(_e) { resolve(orig); }
+        };
+        img.onerror = function(){ resolve(orig); };
+        img.src = orig;
+      };
+      fr.readAsDataURL(file);
+    } catch(_err) { reject(_err); }
+  });
+}
+
 function Audit({ seuilsGlobaux }) {
   const TECHNICIENS = useTechniciens();
 
@@ -14669,16 +14704,28 @@ function Audit({ seuilsGlobaux }) {
                 </div>
                 <div>
                   <label style={{fontSize:9,color:"#7a90aa",fontWeight:600,textTransform:"uppercase",display:"block",marginBottom:4}}>Photos ({(obs.photos||[]).length})</label>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   <label style={{background:"#243352",border:"1px dashed #3d5270",borderRadius:7,padding:"5px 12px",fontSize:10,color:"#7a90aa",cursor:"pointer"}}>
-                    + Ajouter photos
+                    📷 Appareil photo
                     <input type="file" accept="image/*" capture="environment" multiple style={{display:"none"}} onChange={e=>{
+                      const oid=obs.id;
                       Array.from(e.target.files).forEach(file=>{
-                        const r=new FileReader();
-                        r.onload=ev=>setObsItems(prev=>prev.map(o=>o.id===obs.id?{...o,photos:[...(o.photos||[]),{url:ev.target.result,name:file.name}]}:o));
-                        r.readAsDataURL(file);
+                        compressImageFile(file,1400,0.6).then(url=>setObsItems(prev=>prev.map(o=>o.id===oid?{...o,photos:[...(o.photos||[]),{url:url,name:file.name}]}:o))).catch(()=>{});
                       });
+                      e.target.value="";
                     }}/>
                   </label>
+                  <label style={{background:"#243352",border:"1px dashed #3d5270",borderRadius:7,padding:"5px 12px",fontSize:10,color:"#7a90aa",cursor:"pointer"}}>
+                    🖼 Galerie
+                    <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={e=>{
+                      const oid=obs.id;
+                      Array.from(e.target.files).forEach(file=>{
+                        compressImageFile(file,1400,0.6).then(url=>setObsItems(prev=>prev.map(o=>o.id===oid?{...o,photos:[...(o.photos||[]),{url:url,name:file.name}]}:o))).catch(()=>{});
+                      });
+                      e.target.value="";
+                    }}/>
+                  </label>
+                  </div>
                     {(obs.photos||[]).length>0&&(
                     <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:6}}>
                       {(obs.photos||[]).map((ph,j)=>(
