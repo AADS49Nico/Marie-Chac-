@@ -10767,32 +10767,39 @@ function DeepCleaning() {
     return SUPABASE_URL + "/storage/v1/object/public/documents/" + path;
   }
 
+  async function prepareVideo(raw) {
+    // compresse puis renvoie le fichier à envoyer (ou lève une erreur claire si trop lourd)
+    const file = await compressVideoFile(raw, {});
+    if (file.size > 190*1024*1024) throw new Error("Vidéo encore trop lourde même après compression. Filmez une séquence plus courte.");
+    return file;
+  }
+
   async function addVideoToGroupe(gid, e) {
-    const file = (e.target.files||[])[0];
+    const raw = (e.target.files||[])[0];
     e.target.value = "";
-    if (!file) return;
-    if (!/^video\//.test(file.type||"")) { alert("Ce fichier n'est pas une vidéo."); return; }
-    if (file.size > 60*1024*1024) { alert("Vidéo trop lourde (max 60 Mo). Filmez une séquence plus courte."); return; }
+    if (!raw) return;
+    if (!/^video\//.test(raw.type||"")) { alert("Ce fichier n'est pas une vidéo."); return; }
     setUploadingVideo(gid);
     try {
+      const file = await prepareVideo(raw);
       const url = await uploadVideoFile(file);
-      setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, videos:[...(g.videos||[]), { url, name:file.name }]} : g));
+      setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, videos:[...(g.videos||[]), { url, name:raw.name }]} : g));
     } catch(err) { alert(err.message||String(err)); }
     setUploadingVideo(null);
   }
 
   async function addGroupeFromVideo(e) {
-    const file = (e.target.files||[])[0];
+    const raw = (e.target.files||[])[0];
     e.target.value = "";
-    if (!file) return;
-    if (!/^video\//.test(file.type||"")) { alert("Ce fichier n'est pas une vidéo."); return; }
-    if (file.size > 60*1024*1024) { alert("Vidéo trop lourde (max 60 Mo). Filmez une séquence plus courte."); return; }
+    if (!raw) return;
+    if (!/^video\//.test(raw.type||"")) { alert("Ce fichier n'est pas une vidéo."); return; }
     const gid = "g"+Date.now()+Math.random().toString(36).slice(2,6);
     setDraftGroupes(prev => [...prev, { id:gid, photos:[], videos:[], commentaire:"" }]);
     setUploadingVideo(gid);
     try {
+      const file = await prepareVideo(raw);
       const url = await uploadVideoFile(file);
-      setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, videos:[{ url, name:file.name }]} : g));
+      setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, videos:[{ url, name:raw.name }]} : g));
     } catch(err) { alert(err.message||String(err)); setDraftGroupes(prev => prev.filter(g => g.id!==gid)); }
     setUploadingVideo(null);
   }
@@ -10955,7 +10962,7 @@ function DeepCleaning() {
                     <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>addPhotosToGroupe(g.id,e)}/>
                   </label>
                   <label style={{background:"#243352",border:"1px solid #3d5270",borderRadius:7,padding:"5px 10px",fontSize:11,color:uploadingVideo===g.id?"#f59e0b":"#9fb2cc",cursor:uploadingVideo===g.id?"wait":"pointer"}}>
-                    {uploadingVideo===g.id ? "⏳ Envoi vidéo..." : "🎬 Vidéo"}
+                    {uploadingVideo===g.id ? "⏳ Traitement vidéo..." : "🎬 Vidéo"}
                     <input type="file" accept="video/*,.mp4,.mov,.m4v,.webm,.avi" disabled={uploadingVideo===g.id} style={{display:"none"}} onChange={e=>addVideoToGroupe(g.id,e)}/>
                   </label>
                   <button type="button" onClick={()=>removeGroupe(g.id)}
@@ -10974,10 +10981,11 @@ function DeepCleaning() {
                 <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={addGroupeFromFiles}/>
               </label>
               <label style={{background:uploadingVideo?"#f59e0b22":"#7c3aed22",border:"1px dashed "+(uploadingVideo?"#f59e0b":"#a855f7"),borderRadius:8,padding:"8px 14px",fontSize:11,color:uploadingVideo?"#f59e0b":"#c084fc",cursor:uploadingVideo?"wait":"pointer",fontWeight:600}}>
-                {uploadingVideo ? "⏳ Envoi vidéo..." : "🎬 Vidéo — nouveau groupe"}
+                {uploadingVideo ? "⏳ Traitement vidéo..." : "🎬 Vidéo — nouveau groupe"}
                 <input type="file" accept="video/*,.mp4,.mov,.m4v,.webm,.avi" disabled={!!uploadingVideo} style={{display:"none"}} onChange={addGroupeFromVideo}/>
               </label>
             </div>
+            <div style={{fontSize:10.5,color:"#7a90aa",marginTop:6,lineHeight:1.5}}>Les vidéos sont automatiquement compressées (≈720p) avant l'envoi : comptez quelques secondes à ~1 min selon la durée. Patientez jusqu'à l'apparition de la vignette.</div>
           </div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={save} style={{background:"#1d4ed8",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
@@ -14574,6 +14582,72 @@ function PhotoAnnotator(props) {
       }, "✓ Enregistrer les annotations")
     )
   );
+}
+
+function compressVideoFile(file, opts) {
+  // Compresse/réduit une vidéo dans le navigateur (canvas + MediaRecorder).
+  // Réduit la résolution (max ~1280px) et le débit -> fichier beaucoup plus léger.
+  // En cas d'échec ou de non-support, renvoie le fichier d'origine (repli sûr).
+  opts = opts || {};
+  var maxDim = opts.maxDim || 1280;
+  var fps = opts.fps || 24;
+  var vbps = opts.videoBitsPerSecond || 2200000; // ~2.2 Mb/s
+  return new Promise(function (resolve) {
+    try {
+      if (!file || !/^video\//.test(file.type || "")) return resolve(file);
+      if (typeof MediaRecorder === "undefined" || !HTMLCanvasElement.prototype.captureStream) return resolve(file);
+      var video = document.createElement("video");
+      video.muted = true; video.playsInline = true; video.preload = "auto";
+      var url = URL.createObjectURL(file);
+      var done = false, failTimer = null;
+      function finish(result) { if (done) return; done = true; if (failTimer) clearTimeout(failTimer); try { URL.revokeObjectURL(url); } catch (_e) {} resolve(result); }
+      video.onerror = function () { finish(file); };
+      video.onloadedmetadata = function () {
+        var w = video.videoWidth || 0, h = video.videoHeight || 0;
+        if (!w || !h) return finish(file);
+        var scale = Math.min(1, maxDim / Math.max(w, h));
+        var cw = Math.max(2, Math.round(w * scale / 2) * 2);
+        var ch = Math.max(2, Math.round(h * scale / 2) * 2);
+        var canvas = document.createElement("canvas"); canvas.width = cw; canvas.height = ch;
+        var ctx = canvas.getContext("2d");
+        var stream;
+        try { stream = canvas.captureStream(fps); } catch (_e) { return finish(file); }
+        try {
+          var srcStream = video.captureStream ? video.captureStream() : (video.mozCaptureStream ? video.mozCaptureStream() : null);
+          if (srcStream && srcStream.getAudioTracks) srcStream.getAudioTracks().forEach(function (t) { try { stream.addTrack(t); } catch (_e) {} });
+        } catch (_e) {}
+        var mime = "";
+        ["video/mp4;codecs=h264", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].some(function (m) {
+          if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) { mime = m; return true; } return false;
+        });
+        var recOpts = { videoBitsPerSecond: vbps }; if (mime) recOpts.mimeType = mime;
+        var rec;
+        try { rec = new MediaRecorder(stream, recOpts); } catch (_e) { try { rec = new MediaRecorder(stream); } catch (_e2) { return finish(file); } }
+        var chunks = [];
+        rec.ondataavailable = function (ev) { if (ev.data && ev.data.size) chunks.push(ev.data); };
+        rec.onstop = function () {
+          try {
+            var outType = (rec.mimeType || mime || "video/webm").split(";")[0];
+            var blob = new Blob(chunks, { type: outType });
+            if (!blob.size || blob.size >= file.size) return finish(file);
+            var ext = outType.indexOf("mp4") >= 0 ? ".mp4" : ".webm";
+            var base = (file.name || "video").replace(/\.[^.]+$/, "");
+            finish(new File([blob], base + "_compr" + ext, { type: outType }));
+          } catch (_e) { finish(file); }
+        };
+        var draw = function () { if (done || video.ended || video.paused) return; try { ctx.drawImage(video, 0, 0, cw, ch); } catch (_e) {} requestAnimationFrame(draw); };
+        video.onended = function () { try { rec.stop(); } catch (_e) {} };
+        video.onplay = function () { draw(); };
+        try { rec.start(); } catch (_e) { return finish(file); }
+        var p = video.play();
+        if (p && p.catch) p.catch(function () { finish(file); });
+        var dur = isFinite(video.duration) ? video.duration : 0;
+        var cap = Math.min(12 * 60 * 1000, (dur ? dur * 1000 : 120000) + 10000);
+        failTimer = setTimeout(function () { try { rec.stop(); } catch (_e) {} }, cap);
+      };
+      video.src = url;
+    } catch (_e) { resolve(file); }
+  });
 }
 
 function normGroupeDC(g) {
