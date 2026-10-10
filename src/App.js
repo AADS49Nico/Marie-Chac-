@@ -10762,12 +10762,29 @@ function DeepCleaning() {
     const file = (e.target.files||[])[0];
     e.target.value = "";
     if (!file) return;
+    if (!/^video\//.test(file.type||"")) { alert("Ce fichier n'est pas une vidéo."); return; }
     if (file.size > 60*1024*1024) { alert("Vidéo trop lourde (max 60 Mo). Filmez une séquence plus courte."); return; }
     setUploadingVideo(gid);
     try {
       const url = await uploadVideoFile(file);
       setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, videos:[...(g.videos||[]), { url, name:file.name }]} : g));
     } catch(err) { alert(err.message||String(err)); }
+    setUploadingVideo(null);
+  }
+
+  async function addGroupeFromVideo(e) {
+    const file = (e.target.files||[])[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!/^video\//.test(file.type||"")) { alert("Ce fichier n'est pas une vidéo."); return; }
+    if (file.size > 60*1024*1024) { alert("Vidéo trop lourde (max 60 Mo). Filmez une séquence plus courte."); return; }
+    const gid = "g"+Date.now()+Math.random().toString(36).slice(2,6);
+    setDraftGroupes(prev => [...prev, { id:gid, photos:[], videos:[], commentaire:"" }]);
+    setUploadingVideo(gid);
+    try {
+      const url = await uploadVideoFile(file);
+      setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, videos:[{ url, name:file.name }]} : g));
+    } catch(err) { alert(err.message||String(err)); setDraftGroupes(prev => prev.filter(g => g.id!==gid)); }
     setUploadingVideo(null);
   }
 
@@ -10930,7 +10947,7 @@ function DeepCleaning() {
                   </label>
                   <label style={{background:"#243352",border:"1px solid #3d5270",borderRadius:7,padding:"5px 10px",fontSize:11,color:uploadingVideo===g.id?"#f59e0b":"#9fb2cc",cursor:uploadingVideo===g.id?"wait":"pointer"}}>
                     {uploadingVideo===g.id ? "⏳ Envoi vidéo..." : "🎬 Vidéo"}
-                    <input type="file" accept="video/*" capture="environment" disabled={uploadingVideo===g.id} style={{display:"none"}} onChange={e=>addVideoToGroupe(g.id,e)}/>
+                    <input type="file" accept="video/*,.mp4,.mov,.m4v,.webm,.avi" disabled={uploadingVideo===g.id} style={{display:"none"}} onChange={e=>addVideoToGroupe(g.id,e)}/>
                   </label>
                   <button type="button" onClick={()=>removeGroupe(g.id)}
                     style={{marginLeft:"auto",background:"#ef444422",color:"#ef4444",border:"1px solid #ef444433",borderRadius:7,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Supprimer le groupe</button>
@@ -10946,6 +10963,10 @@ function DeepCleaning() {
               <label style={{background:"#1d4ed822",border:"1px dashed #1d4ed8",borderRadius:8,padding:"8px 14px",fontSize:11,color:"#3b82f6",cursor:"pointer",fontWeight:600}}>
                 📷 Appareil photo — nouveau groupe
                 <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={addGroupeFromFiles}/>
+              </label>
+              <label style={{background:uploadingVideo?"#f59e0b22":"#7c3aed22",border:"1px dashed "+(uploadingVideo?"#f59e0b":"#a855f7"),borderRadius:8,padding:"8px 14px",fontSize:11,color:uploadingVideo?"#f59e0b":"#c084fc",cursor:uploadingVideo?"wait":"pointer",fontWeight:600}}>
+                {uploadingVideo ? "⏳ Envoi vidéo..." : "🎬 Vidéo — nouveau groupe"}
+                <input type="file" accept="video/*,.mp4,.mov,.m4v,.webm,.avi" disabled={!!uploadingVideo} style={{display:"none"}} onChange={addGroupeFromVideo}/>
               </label>
             </div>
           </div>
