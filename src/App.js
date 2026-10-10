@@ -10748,13 +10748,19 @@ function DeepCleaning() {
   }
 
   async function uploadVideoFile(file) {
-    const path = CLIENT_CONFIG.contrat + "/deepcleaning/" + encodeURIComponent(SITE_ACTIF||"site") + "_" + Date.now() + "_" + sanitizeFileName(file.name);
+    const safeContrat = sanitizeFileName(CLIENT_CONFIG.contrat||"contrat");
+    const safeSite = sanitizeFileName(SITE_ACTIF||"site");
+    const path = safeContrat + "/deepcleaning/" + safeSite + "_" + Date.now() + "_" + sanitizeFileName(file.name);
     const res = await fetch(SUPABASE_URL + "/storage/v1/object/documents/" + path, {
       method:"POST",
-      headers:{ apikey:SUPABASE_KEY, Authorization:"Bearer "+SUPABASE_KEY, "Content-Type":file.type||"video/mp4" },
+      headers:{ apikey:SUPABASE_KEY, Authorization:"Bearer "+SUPABASE_KEY, "Content-Type":file.type||"video/mp4", "x-upsert":"true" },
       body:file
     });
-    if (!res.ok) throw new Error("Upload vidéo échoué ("+res.status+")");
+    if (!res.ok) {
+      let detail = "";
+      try { detail = await res.text(); } catch(_e){}
+      throw new Error("Upload vidéo échoué ("+res.status+")"+(detail?" : "+detail.slice(0,200):""));
+    }
     return SUPABASE_URL + "/storage/v1/object/public/documents/" + path;
   }
 
