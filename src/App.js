@@ -1125,9 +1125,21 @@ function genererFicheIntervention(p, postesTous, planActions){
 }
 
 function exportRapport(prestation, item) {
-  const photos = (item.photos||[]).filter(p=>p.url);
-  const photosHtml = photos.length > 0
-    ? `<div style="margin-top:16px"><div style="font-weight:700;margin-bottom:8px;color:#1d4ed8">Photos</div><div style="display:flex;flex-wrap:wrap;gap:10px">${photos.map(p=>`<img src="${p.url}" style="max-width:200px;max-height:150px;border-radius:6px;border:1px solid #e2e8f0;object-fit:cover"/>`).join("")}</div></div>`
+  // Nouveau format : groupes {photos, videos, commentaire}. Repli sur item.photos (ancien format plat).
+  const groupes = (Array.isArray(item.medias) && item.medias.length)
+    ? item.medias
+    : ((item.photos||[]).filter(p=>p.url).length ? [{ photos:(item.photos||[]).filter(p=>p.url), videos:[], commentaire:"" }] : []);
+  const esc = (t)=>String(t||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const photos = (item.photos||[]).filter(p=>p.url); // compat (autres usages éventuels)
+  const photosHtml = groupes.length > 0
+    ? `<div style="margin-top:16px"><div style="font-weight:700;margin-bottom:8px;color:#1d4ed8">Photos</div>${groupes.map(g=>{
+        const gp = (g.photos||[]).filter(p=>p.url);
+        const gv = (g.videos||[]).filter(v=>v.url);
+        const imgs = gp.length ? `<div style="display:flex;flex-wrap:wrap;gap:10px">${gp.map(p=>`<img src="${p.url}" style="max-width:220px;max-height:165px;border-radius:6px;border:1px solid #e2e8f0;object-fit:cover"/>`).join("")}</div>` : "";
+        const vids = gv.length ? `<div style="margin-top:6px;font-size:11px;color:#475569">🎬 ${gv.length} vidéo(s) — consultable dans le portail :${gv.map(v=>`<br/><a href="${v.url}" style="color:#1d4ed8;word-break:break-all">${esc(v.name||v.url)}</a>`).join("")}</div>` : "";
+        const com = g.commentaire ? `<div style="margin-top:6px;font-size:12.5px;color:#1e293b;background:#f1f5f9;border-left:3px solid #1d4ed8;padding:6px 10px;border-radius:4px">${esc(g.commentaire)}</div>` : "";
+        return `<div style="margin-bottom:14px;break-inside:avoid">${imgs}${vids}${com}</div>`;
+      }).join("")}</div>`
     : "";
 
   const fields = {
@@ -10672,19 +10684,21 @@ function DeepCleaning() {
   const [editId, setEditId] = useState(null);
   const [sel, setSel] = useState(null);
   const [draft, setDraft] = useState({ date:"", technicien:"", zone:"", superficie:"", types_nettoyage:"", produits:"", statut:"Planifié", date_planif:"", observations:"" });
-  const [draftPhotos, setDraftPhotos] = useState([]);
+  const [draftGroupes, setDraftGroupes] = useState([]); // groupes {id, photos:[{url,name}], videos:[{url,name}], commentaire}
+  const [uploadingVideo, setUploadingVideo] = useState(null);
+  const [annot, setAnnot] = useState(null); // {gid, idx, src} photo en cours d'annotation
 
   useEffect(() => {
     sbGet("deep_cleaning").then(data => {
-      if (data && data.length > 0) setInterventions(data.map(d => ({...d, photos:[]})));
+      if (data && data.length > 0) setInterventions(data.map(d => ({...d, medias: parseMediasDC(d)})));
     }).catch(()=>{});
   }, []);
 
-  function resetDraft() { setDraft({ date:"", technicien:"", zone:"", superficie:"", types_nettoyage:"", produits:"", statut:"Planifié", date_planif:"", observations:"" }); setDraftPhotos([]); setEditId(null); }
+  function resetDraft() { setDraft({ date:"", technicien:"", zone:"", superficie:"", types_nettoyage:"", produits:"", statut:"Planifié", date_planif:"", observations:"" }); setDraftGroupes([]); setEditId(null); }
 
   function openEdit(item) {
     setDraft({ date:item.date||"", technicien:item.technicien||"", zone:item.zone||"", superficie:item.superficie||"", types_nettoyage:item.types_nettoyage||"", produits:item.produits||"", statut:item.statut||"Planifié", date_planif:item.date_planif||"", observations:item.observations||"" });
-    setDraftPhotos(item.photos||[]);
+    setDraftGroupes(parseMediasDC(item));
     setEditId(item.id); setShowForm(true);
   }
 
@@ -10694,23 +10708,78 @@ function DeepCleaning() {
     if (!draft.zone) return;
     const dateFmt = fmt(draft.date);
     const datePlanifFmt = fmt(draft.date_planif);
+    const mediasJson = JSON.stringify(draftGroupes);
     if (editId !== null) {
-      setInterventions(prev => prev.map(i => i.id===editId ? {...i,...draft,date:dateFmt,date_planif:datePlanifFmt,photos:draftPhotos} : i));
-      sbUpdate("deep_cleaning", editId, {...draft, date:dateFmt, date_planif:datePlanifFmt});
+      setInterventions(prev => prev.map(i => i.id===editId ? {...i,...draft,date:dateFmt,date_planif:datePlanifFmt,medias:draftGroupes} : i));
+      sbUpdate("deep_cleaning", editId, {...draft, date:dateFmt, date_planif:datePlanifFmt, medias:mediasJson})
+        .then(res=>{ if(!res) console.error("DC update failed"); }).catch(e=>{ alert("Erreur sauvegarde: "+(e.message||e)); });
     } else {
       const id = String(Date.now());
-      setInterventions(prev => [{...draft, date:dateFmt, date_planif:datePlanifFmt, id, photos:draftPhotos}, ...prev]);
-      sbUpsert("deep_cleaning", {id, contrat:CLIENT_CONFIG.contrat, ...draft, date:dateFmt, date_planif:datePlanifFmt});
+      setInterventions(prev => [{...draft, date:dateFmt, date_planif:datePlanifFmt, id, medias:draftGroupes}, ...prev]);
+      sbUpsert("deep_cleaning", {id, contrat:CLIENT_CONFIG.contrat, ...draft, date:dateFmt, date_planif:datePlanifFmt, medias:mediasJson})
+        .then(res=>{ if(!res) console.error("DC upsert failed"); }).catch(e=>{ alert("Erreur sauvegarde: "+(e.message||e)); });
     }
     resetDraft(); setShowForm(false);
   }
 
-  function handlePhoto(e) {
-    Array.from(e.target.files).forEach(file => {
-      const r = new FileReader();
-      r.onload = ev => setDraftPhotos(prev => [...prev, { url:ev.target.result, name:file.name, date:new Date().toLocaleDateString("fr-FR") }]);
-      r.readAsDataURL(file);
+  // ---- gestion des groupes de medias (photos + videos + 1 commentaire) ----
+  async function filesToPhotos(fileList) {
+    const files = Array.from(fileList||[]).filter(f=>/^image\//.test(f.type||""));
+    const out = [];
+    for (const file of files) {
+      try { const url = await compressImageFile(file); out.push({ url, name:file.name }); }
+      catch(_e){}
+    }
+    return out;
+  }
+
+  async function addGroupeFromFiles(e) {
+    const photos = await filesToPhotos(e.target.files);
+    e.target.value = "";
+    if (!photos.length) return;
+    setDraftGroupes(prev => [...prev, { id:"g"+Date.now()+Math.random().toString(36).slice(2,6), photos, videos:[], commentaire:"" }]);
+  }
+
+  async function addPhotosToGroupe(gid, e) {
+    const photos = await filesToPhotos(e.target.files);
+    e.target.value = "";
+    if (!photos.length) return;
+    setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, photos:[...(g.photos||[]), ...photos]} : g));
+  }
+
+  async function uploadVideoFile(file) {
+    const path = CLIENT_CONFIG.contrat + "/deepcleaning/" + encodeURIComponent(SITE_ACTIF||"site") + "_" + Date.now() + "_" + sanitizeFileName(file.name);
+    const res = await fetch(SUPABASE_URL + "/storage/v1/object/documents/" + path, {
+      method:"POST",
+      headers:{ apikey:SUPABASE_KEY, Authorization:"Bearer "+SUPABASE_KEY, "Content-Type":file.type||"video/mp4" },
+      body:file
     });
+    if (!res.ok) throw new Error("Upload vidéo échoué ("+res.status+")");
+    return SUPABASE_URL + "/storage/v1/object/public/documents/" + path;
+  }
+
+  async function addVideoToGroupe(gid, e) {
+    const file = (e.target.files||[])[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 60*1024*1024) { alert("Vidéo trop lourde (max 60 Mo). Filmez une séquence plus courte."); return; }
+    setUploadingVideo(gid);
+    try {
+      const url = await uploadVideoFile(file);
+      setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, videos:[...(g.videos||[]), { url, name:file.name }]} : g));
+    } catch(err) { alert(err.message||String(err)); }
+    setUploadingVideo(null);
+  }
+
+  function setGroupeComment(gid, val) { setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, commentaire:val} : g)); }
+  function removeGroupe(gid) { setDraftGroupes(prev => prev.filter(g => g.id!==gid)); }
+  function removePhotoFromGroupe(gid, idx) { setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, photos:g.photos.filter((_,j)=>j!==idx)} : g)); }
+  function removeVideoFromGroupe(gid, idx) { setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, videos:g.videos.filter((_,j)=>j!==idx)} : g)); }
+  function applyAnnotation(newUrl) {
+    if (!annot) return;
+    const { gid, idx } = annot;
+    setDraftGroupes(prev => prev.map(g => g.id===gid ? {...g, photos:g.photos.map((p,j)=>j===idx ? {...p, url:newUrl} : p)} : g));
+    setAnnot(null);
   }
 
   function toggleTech(t) {
@@ -10729,6 +10798,7 @@ function DeepCleaning() {
 
   return (
     <div style={{paddingBottom:40}}>
+      {annot && <PhotoAnnotator src={annot.src} onSave={applyAnnotation} onCancel={()=>setAnnot(null)}/>}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:10}}>
         <div>
           <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9",marginBottom:2}}>Deep Cleaning</div>
@@ -10822,22 +10892,62 @@ function DeepCleaning() {
             <textarea rows={2} value={draft.observations} onChange={e=>setDraft(p=>({...p,observations:e.target.value}))} style={{...inp(),resize:"vertical"}}/>
           </div>
           <div style={{marginBottom:12}}>
-            <label style={{fontSize:10,color:"#7a90aa",fontWeight:600,textTransform:"uppercase",display:"block",marginBottom:6}}>Photos ({draftPhotos.length})</label>
-            <label style={{background:"#243352",border:"1px dashed #3d5270",borderRadius:8,padding:"8px 14px",fontSize:11,color:"#7a90aa",cursor:"pointer"}}>
-              + Ajouter photos
-              <input type="file" accept="image/*" capture="environment" multiple style={{display:"none"}} onChange={handlePhoto}/>
-            </label>
-            {draftPhotos.length>0 && (
-              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:8}}>
-                {draftPhotos.map((ph,i)=>(
-                  <div key={i} style={{position:"relative"}}>
-                    <img src={ph.url} alt={ph.name} style={{width:70,height:70,objectFit:"cover",borderRadius:6,border:"1px solid #3d5270"}}/>
-                    <button onClick={()=>setDraftPhotos(prev=>prev.filter((_,j)=>j!==i))}
-                      style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:16,height:16,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                  </div>
-                ))}
+            <label style={{fontSize:10,color:"#7a90aa",fontWeight:600,textTransform:"uppercase",display:"block",marginBottom:6}}>Photos & vidéos ({draftGroupes.length} groupe(s))</label>
+            <div style={{fontSize:11,color:"#7a90aa",lineHeight:1.5,marginBottom:8}}>Chaque groupe = une ou plusieurs photos/vidéos qui partagent <strong style={{color:"#9fb2cc"}}>un seul commentaire</strong> (le commentaire sort dans le PDF sous les photos). Touchez ✎ sur une photo pour dessiner des flèches dessus.</div>
+
+            {draftGroupes.map((g)=>(
+              <div key={g.id} style={{background:"#141f38",border:"1px solid #2a3a5c",borderRadius:10,padding:12,marginBottom:10}}>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
+                  {(g.photos||[]).map((ph,i)=>(
+                    <div key={"p"+i} style={{position:"relative"}}>
+                      <img src={ph.url} alt={ph.name} style={{width:76,height:76,objectFit:"cover",borderRadius:6,border:"1px solid #3d5270"}}/>
+                      <button type="button" onClick={()=>setAnnot({gid:g.id,idx:i,src:ph.url})} title="Dessiner / flèches"
+                        style={{position:"absolute",bottom:-4,left:-4,background:"#1d4ed8",color:"#fff",border:"none",borderRadius:"50%",width:20,height:20,fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✎</button>
+                      <button type="button" onClick={()=>removePhotoFromGroupe(g.id,i)}
+                        style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                    </div>
+                  ))}
+                  {(g.videos||[]).map((v,i)=>(
+                    <div key={"v"+i} style={{position:"relative"}}>
+                      <video src={v.url} style={{width:76,height:76,objectFit:"cover",borderRadius:6,border:"1px solid #3d5270",background:"#000"}} controls playsInline/>
+                      <span style={{position:"absolute",bottom:2,left:2,background:"#000a",color:"#fff",fontSize:9,padding:"1px 4px",borderRadius:4}}>▶ vidéo</span>
+                      <button type="button" onClick={()=>removeVideoFromGroupe(g.id,i)}
+                        style={{position:"absolute",top:-4,right:-4,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                    </div>
+                  ))}
+                </div>
+                <textarea rows={2} value={g.commentaire} onChange={e=>setGroupeComment(g.id,e.target.value)}
+                  placeholder="Commentaire pour ce groupe de photos/vidéos (sort dans le PDF)..."
+                  style={{...inp(),resize:"vertical",marginBottom:8}}/>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
+                  <label style={{background:"#243352",border:"1px solid #3d5270",borderRadius:7,padding:"5px 10px",fontSize:11,color:"#9fb2cc",cursor:"pointer"}}>
+                    + Photos
+                    <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={e=>addPhotosToGroupe(g.id,e)}/>
+                  </label>
+                  <label style={{background:"#243352",border:"1px solid #3d5270",borderRadius:7,padding:"5px 10px",fontSize:11,color:"#9fb2cc",cursor:"pointer"}}>
+                    📷 Appareil
+                    <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>addPhotosToGroupe(g.id,e)}/>
+                  </label>
+                  <label style={{background:"#243352",border:"1px solid #3d5270",borderRadius:7,padding:"5px 10px",fontSize:11,color:uploadingVideo===g.id?"#f59e0b":"#9fb2cc",cursor:uploadingVideo===g.id?"wait":"pointer"}}>
+                    {uploadingVideo===g.id ? "⏳ Envoi vidéo..." : "🎬 Vidéo"}
+                    <input type="file" accept="video/*" capture="environment" disabled={uploadingVideo===g.id} style={{display:"none"}} onChange={e=>addVideoToGroupe(g.id,e)}/>
+                  </label>
+                  <button type="button" onClick={()=>removeGroupe(g.id)}
+                    style={{marginLeft:"auto",background:"#ef444422",color:"#ef4444",border:"1px solid #ef444433",borderRadius:7,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Supprimer le groupe</button>
+                </div>
               </div>
-            )}
+            ))}
+
+            <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:4}}>
+              <label style={{background:"#1d4ed822",border:"1px dashed #1d4ed8",borderRadius:8,padding:"8px 14px",fontSize:11,color:"#3b82f6",cursor:"pointer",fontWeight:600}}>
+                🖼 Galerie — nouveau groupe
+                <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={addGroupeFromFiles}/>
+              </label>
+              <label style={{background:"#1d4ed822",border:"1px dashed #1d4ed8",borderRadius:8,padding:"8px 14px",fontSize:11,color:"#3b82f6",cursor:"pointer",fontWeight:600}}>
+                📷 Appareil photo — nouveau groupe
+                <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={addGroupeFromFiles}/>
+              </label>
+            </div>
           </div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={save} style={{background:"#1d4ed8",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
@@ -10880,13 +10990,19 @@ function DeepCleaning() {
               <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #3d5270"}}>
                 {item.produits && <div style={{fontSize:12,color:"#94a3b8",marginBottom:4}}><strong style={{color:"#7a90aa"}}>Produits :</strong> {item.produits}</div>}
                 {item.observations && <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}><strong style={{color:"#7a90aa"}}>Observations :</strong> {item.observations}</div>}
-                {item.photos && item.photos.length>0 && (
-                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                    {item.photos.map((ph,j)=>(
-                      <img key={j} src={ph.url} alt={ph.name} style={{width:80,height:80,objectFit:"cover",borderRadius:6,border:"1px solid #3d5270"}}/>
-                    ))}
+                {(item.medias||[]).map((g,gi)=>(
+                  <div key={g.id||gi} style={{marginBottom:10}}>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      {(g.photos||[]).map((ph,j)=>(
+                        <img key={"p"+j} src={ph.url} alt={ph.name} style={{width:80,height:80,objectFit:"cover",borderRadius:6,border:"1px solid #3d5270"}}/>
+                      ))}
+                      {(g.videos||[]).map((v,j)=>(
+                        <video key={"v"+j} src={v.url} controls playsInline style={{width:110,height:80,objectFit:"cover",borderRadius:6,border:"1px solid #3d5270",background:"#000"}}/>
+                      ))}
+                    </div>
+                    {g.commentaire && <div style={{fontSize:12,color:"#cbd5e1",marginTop:4,fontStyle:"italic"}}>“{g.commentaire}”</div>}
                   </div>
-                )}
+                ))}
               </div>
             )}
           </Card>
@@ -14274,6 +14390,188 @@ function AuditObservationsParZoneChart({ audits }) {
 // au telephone font plusieurs Mo : sans ca, un audit avec photos devient trop
 // lourd et l'enregistrement echoue. Resultat : JPEG max ~1400px, qualite ~0.6
 // (~100-250 Ko). Les non-images (PDF) et les cas d'echec gardent l'original.
+// Deep Cleaning : lit les groupes de photos commentes depuis une ligne.
+// Formats acceptes : medias = groupes [{photos:[{url,name}],commentaire}],
+// medias = ancien tableau plat de photos, ou ancien champ photos.
+function PhotoAnnotator(props) {
+  // props: src (dataURL de la photo), onSave(newDataUrl), onCancel()
+  var canvasRef = useRef(null);
+  var imgRef = useRef(null);
+  var draftRef = useRef(null);
+  var drawingRef = useRef(false);
+  var dims = useRef({ w: 0, h: 0, lw: 4 });
+  var [shapes, setShapes] = useState([]);
+  var [color, setColor] = useState("#ef4444");
+  var [tool, setTool] = useState("arrow"); // arrow | pen | rect
+  var [ready, setReady] = useState(false);
+  var COLORS = ["#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#ffffff", "#000000"];
+
+  useEffect(function () {
+    var img = new Image();
+    img.onload = function () {
+      var maxDim = 1400;
+      var w = img.naturalWidth || 800, h = img.naturalHeight || 600;
+      var scale = Math.min(1, maxDim / Math.max(w, h));
+      w = Math.round(w * scale); h = Math.round(h * scale);
+      dims.current = { w: w, h: h, lw: Math.max(4, Math.round(Math.max(w, h) / 160)) };
+      imgRef.current = img;
+      var c = canvasRef.current;
+      if (c) { c.width = w; c.height = h; }
+      setReady(true);
+    };
+    img.src = props.src;
+  }, [props.src]);
+
+  useEffect(function () { redraw(null); }, [shapes, ready]);
+
+  function drawShape(ctx, s) {
+    ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
+    ctx.lineWidth = dims.current.lw; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    if (s.type === "pen") {
+      var pts = s.points || []; if (pts.length < 2) return;
+      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+      for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke(); return;
+    }
+    if (s.type === "rect") {
+      ctx.strokeRect(Math.min(s.x1, s.x2), Math.min(s.y1, s.y2), Math.abs(s.x2 - s.x1), Math.abs(s.y2 - s.y1));
+      return;
+    }
+    // arrow
+    ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+    var ang = Math.atan2(s.y2 - s.y1, s.x2 - s.x1);
+    var head = Math.max(14, dims.current.lw * 4);
+    ctx.beginPath();
+    ctx.moveTo(s.x2, s.y2);
+    ctx.lineTo(s.x2 - head * Math.cos(ang - Math.PI / 6), s.y2 - head * Math.sin(ang - Math.PI / 6));
+    ctx.lineTo(s.x2 - head * Math.cos(ang + Math.PI / 6), s.y2 - head * Math.sin(ang + Math.PI / 6));
+    ctx.closePath(); ctx.fill();
+  }
+
+  function redraw(draft) {
+    var c = canvasRef.current; if (!c) return;
+    var ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, c.width, c.height);
+    if (imgRef.current) ctx.drawImage(imgRef.current, 0, 0, c.width, c.height);
+    shapes.forEach(function (s) { drawShape(ctx, s); });
+    if (draft) drawShape(ctx, draft);
+  }
+
+  function pos(e) {
+    var c = canvasRef.current; var r = c.getBoundingClientRect();
+    var t = (e.touches && e.touches[0]) ? e.touches[0] : e;
+    var x = (t.clientX - r.left) * (c.width / r.width);
+    var y = (t.clientY - r.top) * (c.height / r.height);
+    return { x: x, y: y };
+  }
+
+  function down(e) {
+    e.preventDefault();
+    var p = pos(e); drawingRef.current = true;
+    if (tool === "pen") draftRef.current = { type: "pen", color: color, points: [p] };
+    else draftRef.current = { type: tool, color: color, x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+  }
+  function move(e) {
+    if (!drawingRef.current || !draftRef.current) return;
+    e.preventDefault();
+    var p = pos(e);
+    if (draftRef.current.type === "pen") draftRef.current.points.push(p);
+    else { draftRef.current.x2 = p.x; draftRef.current.y2 = p.y; }
+    redraw(draftRef.current);
+  }
+  function up(e) {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    var d = draftRef.current; draftRef.current = null;
+    if (!d) return;
+    var keep = d.type === "pen" ? (d.points.length > 1) : (Math.abs(d.x2 - d.x1) + Math.abs(d.y2 - d.y1) > 6);
+    if (keep) setShapes(function (prev) { return prev.concat([d]); });
+    else redraw(null);
+  }
+
+  function save() {
+    redraw(null);
+    var c = canvasRef.current; if (!c) { props.onCancel && props.onCancel(); return; }
+    try { props.onSave(c.toDataURL("image/jpeg", 0.85)); }
+    catch (_e) { props.onCancel && props.onCancel(); }
+  }
+
+  var tBtn = function (key, label) {
+    return React.createElement("button", {
+      type: "button", onClick: function () { setTool(key); },
+      style: { background: tool === key ? "#1d4ed8" : "#1a2540", color: tool === key ? "#fff" : "#9fb2cc", border: "1px solid " + (tool === key ? "#1d4ed8" : "#3d5270"), borderRadius: 6, padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }
+    }, label);
+  };
+
+  return React.createElement("div", {
+    style: { position: "fixed", inset: 0, background: "rgba(5,10,20,0.92)", zIndex: 9999, display: "flex", flexDirection: "column", padding: 12, boxSizing: "border-box" }
+  },
+    React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 10 } },
+      tBtn("arrow", "➤ Flèche"), tBtn("pen", "✎ Libre"), tBtn("rect", "▭ Cadre"),
+      React.createElement("div", { style: { display: "flex", gap: 4, marginLeft: 6 } },
+        COLORS.map(function (c) {
+          return React.createElement("button", {
+            key: c, type: "button", onClick: function () { setColor(c); },
+            style: { width: 24, height: 24, borderRadius: "50%", background: c, border: color === c ? "3px solid #fff" : "1px solid #3d5270", cursor: "pointer", padding: 0 }
+          });
+        })
+      ),
+      React.createElement("button", {
+        type: "button", onClick: function () { setShapes(function (p) { return p.slice(0, -1); }); },
+        style: { background: "#1a2540", color: "#9fb2cc", border: "1px solid #3d5270", borderRadius: 6, padding: "6px 10px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", marginLeft: "auto" }
+      }, "↶ Annuler trait"),
+      React.createElement("button", {
+        type: "button", onClick: function () { setShapes([]); },
+        style: { background: "#1a2540", color: "#9fb2cc", border: "1px solid #3d5270", borderRadius: 6, padding: "6px 10px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }
+      }, "Tout effacer")
+    ),
+    React.createElement("div", { style: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "auto" } },
+      React.createElement("canvas", {
+        ref: canvasRef,
+        onMouseDown: down, onMouseMove: move, onMouseUp: up, onMouseLeave: up,
+        onTouchStart: down, onTouchMove: move, onTouchEnd: up,
+        style: { maxWidth: "100%", maxHeight: "100%", touchAction: "none", borderRadius: 8, border: "1px solid #3d5270", background: "#000", cursor: "crosshair" }
+      })
+    ),
+    React.createElement("div", { style: { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 } },
+      React.createElement("button", {
+        type: "button", onClick: function () { props.onCancel && props.onCancel(); },
+        style: { background: "transparent", color: "#9fb2cc", border: "1px solid #3d5270", borderRadius: 8, padding: "9px 16px", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }
+      }, "Annuler"),
+      React.createElement("button", {
+        type: "button", onClick: save,
+        style: { background: "#22c55e", color: "#06230f", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }
+      }, "✓ Enregistrer les annotations")
+    )
+  );
+}
+
+function normGroupeDC(g) {
+  g = g || {};
+  return {
+    id: g.id || ("g" + Math.random().toString(36).slice(2)),
+    photos: Array.isArray(g.photos) ? g.photos.filter(function(p){ return p && p.url; }) : [],
+    videos: Array.isArray(g.videos) ? g.videos.filter(function(v){ return v && v.url; }) : [],
+    commentaire: g.commentaire || ""
+  };
+}
+
+function parseMediasDC(d) {
+  if (!d) return [];
+  var m = d.medias;
+  if (typeof m === "string") { try { m = JSON.parse(m || "[]"); } catch(_e) { m = []; } }
+  if (Array.isArray(m) && m.length) {
+    // nouveau format : liste de groupes {id, photos, videos, commentaire}
+    if (m[0] && (m[0].photos || m[0].videos || typeof m[0].commentaire === "string")) return m.map(normGroupeDC);
+    // ancien format medias = liste de photos brutes
+    return [normGroupeDC({ id:"g0", photos:m, commentaire:"" })];
+  }
+  var p = d.photos;
+  if (typeof p === "string") { try { p = JSON.parse(p || "[]"); } catch(_e) { p = []; } }
+  if (Array.isArray(p) && p.length) return [normGroupeDC({ id:"g0", photos:p, commentaire:"" })];
+  return [];
+}
+
 function compressImageFile(file, maxDim, quality) {
   return new Promise(function(resolve, reject){
     try {
