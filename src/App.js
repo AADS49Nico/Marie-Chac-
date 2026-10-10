@@ -10759,6 +10759,9 @@ function DeepCleaning() {
     if (!res.ok) {
       let detail = "";
       try { detail = await res.text(); } catch(_e){}
+      if (res.status===413 || /EntityTooLarge|Payload too large/i.test(detail)) {
+        throw new Error("Vidéo trop lourde pour le stockage. Dans Supabase > Storage > Settings, augmentez « Upload file size limit » (ex : 200 Mo), ou filmez une séquence plus courte / en qualité plus basse (720p).");
+      }
       throw new Error("Upload vidéo échoué ("+res.status+")"+(detail?" : "+detail.slice(0,200):""));
     }
     return SUPABASE_URL + "/storage/v1/object/public/documents/" + path;
