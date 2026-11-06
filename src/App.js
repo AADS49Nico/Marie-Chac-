@@ -382,11 +382,15 @@ const NUISIBLES_LIST = ["Rongeurs", "Blattes", "Insectes volants", "Teignes", "I
 const FORMES_DISPO = ["rond", "carre", "rect", "ovale", "triangle"];
 const POSTE_FORMES_DEFAUT = {
   RE: "rond", RI: "rond",
-  "Blattes": "carre", "Insectes volants": "triangle", "Teignes": "ovale", "IPS": "carre",
+  "Blattes": "carre", "Insectes volants": "rect", "Teignes": "ovale", "IPS": "carre",
 };
 // Categorie de forme d un poste : RE / RI pour les rongeurs, sinon le nom du nuisible.
+// Un poste de type DEIV (destructeur d'insectes volants) est toujours rangé dans
+// la catégorie "Insectes volants", même si son champ nuisible est resté "Rongeurs".
 function categorieForme(poste) {
+  if (poste && poste.type === "DEIV") return "Insectes volants";
   var nuisible = (poste && poste.nuisible) || "Rongeurs";
+  if (nuisible === "Insectes volants") return "Insectes volants";
   if (nuisible === "Rongeurs") return poste && poste.type === "RE" ? "RE" : "RI";
   return nuisible;
 }
@@ -1015,14 +1019,195 @@ function _ficheConsomme(s){ const e=(s&&s.etat!=null)?String(s.etat).trim():""; 
 function _ficheExterieur(po){ if(!po)return false; if(po.type==="RE")return true; if(po.type==="RI")return false; return /ext/i.test(String(po.macro||po.zone||"")); }
 function _ficheValide(s){ return !!s && (s.vu===true || s.vu==="true" || _ficheConsomme(s) || _ficheCaptures(s)>0); }
 
+// === [Porté de La Toque] Helpers couleurs/état + plan dans la fiche ===
+// Total des insectes capturés sur un poste DEIV / insectes volants (champs iv_*)
+function totalCapturesIV(s){
+  if (!s) return 0;
+  let t = 0; Object.keys(s).forEach(k=>{ if(k.indexOf("iv_")===0) t += (parseInt(s[k]||0)||0); });
+  return t;
+}
+// Un passage compte comme DEIV / insectes volants s'il est typé "Insectes volants"
+// OU s'il contient des captures d'insectes volants (clés iv_*). Cela couvre les
+// saisies faites via la saisie mobile où le type du passage peut différer.
+function estPassageDeiv(p){
+  if (!p) return false;
+  if (p.type === "Insectes volants") return true;
+  let s; try { s = typeof p.saisies==="string" ? JSON.parse(p.saisies||"{}") : (p.saisies||{}); } catch(_e){ return false; }
+  return Object.values(s||{}).some(v=> v && typeof v==="object" && Object.keys(v).some(k=>k.indexOf("iv_")===0 && parseInt(v[k]||0)>0));
+}
+// Couleur d'un poste selon son état ET les seuils configurés — reprend exactement
+// la logique de getPosteColor() de l'onglet plan d'implantation, pour que la fiche
+// (plan + tableaux) affiche les mêmes couleurs que l'application.
+function couleurPosteSeuil(po, s, seuilsGlobaux){
+  if (!s) return "#22c55e";
+  const sg = seuilsGlobaux || {};
+  const etat = s.etat||"";
+  const consoOrange = (sg.rongeurs && sg.rongeurs.conso_orange) || "25%";
+  const consoRouge  = (sg.rongeurs && sg.rongeurs.conso_rouge)  || "75%";
+  function niveauIdx(n){ if(n==="Totale"||n==="CONSOMMATION TOTALE") return 4; if(n==="75%") return 3; if(n==="50%") return 2; if(n==="25%"||n==="CONSOMMATION PARTIELLE") return 1; return 0; }
+  const etatIdx = niveauIdx(etat);
+  if (etatIdx > 0){ if(etatIdx>=niveauIdx(consoRouge)) return "#ef4444"; if(etatIdx>=niveauIdx(consoOrange)) return "#f59e0b"; return "#22c55e"; }
+  const totalCap = (parseInt(s.cap_souris||0))+(parseInt(s.cap_ratBrun||0))+(parseInt(s.cap_ratNoir||0));
+  if (totalCap > 0){
+    const id = (po && po.id) || "";
+    const isExt = /^RE/i.test(id);
+    const isInt = /^(RI|R\d|S\d)/i.test(id) && !isExt;
+    if (isExt){ const sl=(sg.rongeursExt&&sg.rongeursExt.leger)??1; const sm=(sg.rongeursExt&&sg.rongeursExt.moyen)??3; if(totalCap>=sm) return "#ef4444"; if(totalCap>=sl) return "#f59e0b"; return "#22c55e"; }
+    if (isInt){ const sl=(sg.rongeursInt&&sg.rongeursInt.leger)??1; const sm=(sg.rongeursInt&&sg.rongeursInt.moyen)??3; if(totalCap>=sm) return "#ef4444"; if(totalCap>=sl) return "#f59e0b"; return "#22c55e"; }
+    return "#ef4444";
+  }
+  const ivCats = ["Moucherons","Mouches","Moustiques","Hymenopteres","Lepidopteres","Coleopteres","Punaises","Tipules"];
+  const ivParCat = {}; ivCats.forEach(cat=>{ ivParCat[cat]=parseInt(s["iv_"+cat]||0); });
+  const ivTotal = ivCats.reduce((acc,cat)=>acc+ivParCat[cat],0);
+  if (ivTotal > 0){
+    let maxNiveau = 0;
+    ivCats.forEach(cat=>{ const v=ivParCat[cat]; if(v<=0) return;
+      const sl=((sg.iv&&sg.iv[cat]&&sg.iv[cat].leger))??(cat==="Moucherons"?350:cat==="Mouches"?150:cat==="Moustiques"?60:cat==="Hymenopteres"?50:cat==="Lepidopteres"?45:cat==="Coleopteres"?15:cat==="Punaises"?5:10);
+      const sm=((sg.iv&&sg.iv[cat]&&sg.iv[cat].moyen))??(cat==="Moucherons"?500:cat==="Mouches"?250:cat==="Moustiques"?100:cat==="Hymenopteres"?100:cat==="Lepidopteres"?100:cat==="Coleopteres"?30:cat==="Punaises"?10:20);
+      if(v>=sm) maxNiveau=Math.max(maxNiveau,2); else if(v>=sl) maxNiveau=Math.max(maxNiveau,1);
+    });
+    if (maxNiveau>=2) return "#ef4444"; if (maxNiveau>=1) return "#f59e0b"; return "#22c55e";
+  }
+  const nuisible = (po && po.nuisible) || "Rongeurs";
+  if (nuisible==="Insectes volants") return "#22c55e";
+  const valNum = parseFloat(etat);
+  if (!isNaN(valNum) && valNum > 0){
+    let seuilLeger=null, seuilMoyen=null;
+    if (nuisible==="Teigne"||nuisible==="Teignes"){ seuilLeger=(sg.Teignes&&sg.Teignes.leger)??(sg.teignes&&sg.teignes.leger)??100; seuilMoyen=(sg.Teignes&&sg.Teignes.moyen)??(sg.teignes&&sg.teignes.moyen)??150; }
+    else if (nuisible==="IPS"){ seuilLeger=(sg.IPS&&sg.IPS.leger)??(sg.ips&&sg.ips.leger)??3; seuilMoyen=(sg.IPS&&sg.IPS.moyen)??(sg.ips&&sg.ips.moyen)??8; }
+    else if (nuisible==="Blattes"){ seuilLeger=(sg.Blattes&&sg.Blattes.leger)??(sg.blattes&&sg.blattes.leger)??5; seuilMoyen=(sg.Blattes&&sg.Blattes.moyen)??(sg.blattes&&sg.blattes.moyen)??10; }
+    if (seuilLeger!==null){ if(valNum>=seuilMoyen) return "#ef4444"; if(valNum>=seuilLeger) return "#f59e0b"; return "#22c55e"; }
+    return "#f59e0b";
+  }
+  return "#22c55e";
+}
+// Construit le(s) plan(s) d'implantation pour la fiche, postes colorés selon leur état du passage.
+async function construirePlanFiche(p, postesTous, saisies){
+  const esc = t=>String(t==null?"":t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  try {
+    const [plans, plansDessines, positions, seuilsRows, passagesAll] = await Promise.all([
+      sbGet("plans").catch(()=>[]),
+      sbGet("plans_dessines").catch(()=>[]),
+      sbGet("poste_positions").catch(()=>[]),
+      sbGet("seuils").catch(()=>[]),
+      sbGet("passages").catch(()=>[]),
+    ]);
+    // On garde aussi bien les plans avec image que les plans dessinés (ex. STEP),
+    // ces derniers étant stockés dans la table plans_dessines (id préfixé "dessine_").
+    const imgPlans = (plans||[]).map(pl=>({ ...pl, img: pl.img_url || pl.img }))
+      .filter(pl => pl.img || pl.dessine || (pl.elements && pl.elements.length) || pl.backgroundImg);
+    const dessinePlans = (plansDessines||[]).map(d=>({
+      id: "dessine_"+d.id, label: d.label, img: null, dessine: true,
+      elements: typeof d.elements==="string" ? (function(){try{return JSON.parse(d.elements||"[]")}catch(_e){return []}})() : (d.elements||[]),
+      backgroundImg: d.background_img || null,
+    }));
+    const allPlans = [...imgPlans, ...dessinePlans];
+    if (!allPlans.length) return "";
+    // Seuils configurés (mêmes que l'onglet plan d'implantation / saisie)
+    let seuilsGlobaux = {};
+    try {
+      if (seuilsRows && seuilsRows.length && seuilsRows[0].data) {
+        seuilsGlobaux = typeof seuilsRows[0].data === "string" ? JSON.parse(seuilsRows[0].data) : seuilsRows[0].data;
+      }
+    } catch(_e) { seuilsGlobaux = {}; }
+    // Saisie fusionnée pour la date du passage (rongeurs + DEIV), comme getSaisie()
+    const dateFiche = p && p.date;
+    const saisiesDate = {};
+    (passagesAll||[]).filter(pa=>pa && pa.date===dateFiche).forEach(pa=>{
+      let sj = {}; try { sj = typeof pa.saisies==="string" ? JSON.parse(pa.saisies||"{}") : (pa.saisies||{}); } catch(_e){ sj={}; }
+      Object.entries(sj).forEach(([id,s])=>{
+        if (!s) return;
+        if (!saisiesDate[id]) saisiesDate[id] = {...s};
+        else { Object.keys(s).forEach(k=>{ if(k.indexOf("iv_")===0) saisiesDate[id][k]=(parseInt(saisiesDate[id][k]||0)+parseInt(s[k]||0)); else if(!saisiesDate[id][k]) saisiesDate[id][k]=s[k]; }); }
+      });
+    });
+    // Fusion avec les saisies transmises par la fiche (au cas où le passage n'est pas encore en base)
+    Object.keys(saisies||{}).forEach(id=>{ if(saisies[id]!=null && saisiesDate[id]==null) saisiesDate[id]=saisies[id]; });
+    // Rendu d'un plan dessiné (sans photo) en SVG inline pour le PDF.
+    function dessineSvgHTML(pl){
+      const els = pl.elements || [];
+      let inner = "";
+      if (pl.backgroundImg) inner += "<image href='"+pl.backgroundImg+"' x='0' y='0' width='900' height='600' preserveAspectRatio='xMidYMid meet'/>";
+      els.forEach(el=>{
+        const c = el.color||"#334155", sw = el.strokeWidth||2;
+        if (el.type==="trait") inner += "<line x1='"+el.x1+"' y1='"+el.y1+"' x2='"+el.x2+"' y2='"+el.y2+"' stroke='"+c+"' stroke-width='"+sw+"' stroke-linecap='round'/>";
+        else if (el.type==="rect"){ const x=Math.min(el.x1,el.x2),y=Math.min(el.y1,el.y2),w=Math.abs(el.x2-el.x1),h=Math.abs(el.y2-el.y1); inner += "<rect x='"+x+"' y='"+y+"' width='"+w+"' height='"+h+"' fill='none' stroke='"+c+"' stroke-width='"+sw+"'/>"; }
+        else if (el.type==="cercle"){ const cx=(el.x1+el.x2)/2,cy=(el.y1+el.y2)/2,rx=Math.abs(el.x2-el.x1)/2,ry=Math.abs(el.y2-el.y1)/2; inner += "<ellipse cx='"+cx+"' cy='"+cy+"' rx='"+rx+"' ry='"+ry+"' fill='none' stroke='"+c+"' stroke-width='"+sw+"'/>"; }
+        else if (el.type==="triangle"){ const x1=el.x1,y1=el.y2,x2=el.x2,y2=el.y2,x3=(el.x1+el.x2)/2,y3=el.y1; inner += "<polygon points='"+x1+","+y1+" "+x2+","+y2+" "+x3+","+y3+"' fill='none' stroke='"+c+"' stroke-width='"+sw+"'/>"; }
+        else if (el.type==="fleche"){ const angle=Math.atan2(el.y2-el.y1,el.x2-el.x1); const len=14; const ax1=el.x2-len*Math.cos(angle-Math.PI/6),ay1=el.y2-len*Math.sin(angle-Math.PI/6); const ax2=el.x2-len*Math.cos(angle+Math.PI/6),ay2=el.y2-len*Math.sin(angle+Math.PI/6); inner += "<line x1='"+el.x1+"' y1='"+el.y1+"' x2='"+el.x2+"' y2='"+el.y2+"' stroke='"+c+"' stroke-width='"+sw+"' stroke-linecap='round'/><line x1='"+el.x2+"' y1='"+el.y2+"' x2='"+ax1+"' y2='"+ay1+"' stroke='"+c+"' stroke-width='"+sw+"' stroke-linecap='round'/><line x1='"+el.x2+"' y1='"+el.y2+"' x2='"+ax2+"' y2='"+ay2+"' stroke='"+c+"' stroke-width='"+sw+"' stroke-linecap='round'/>"; }
+        else if (el.type==="polygone"){ const pts2=(el.points||[]).map(pp=>pp.x+","+pp.y).join(" "); inner += "<polygon points='"+pts2+"' fill='none' stroke='"+c+"' stroke-width='"+sw+"'/>"; }
+        else if (el.type==="porte"){ const x=Math.min(el.x1,el.x2),y=Math.min(el.y1,el.y2),w=Math.abs(el.x2-el.x1)||40; inner += "<line x1='"+x+"' y1='"+y+"' x2='"+x+"' y2='"+(y+w)+"' stroke='"+c+"' stroke-width='"+sw+"'/><path d='M "+x+" "+y+" A "+w+" "+w+" 0 0 1 "+(x+w)+" "+y+"' fill='none' stroke='"+c+"' stroke-width='1' stroke-dasharray='3,3'/><line x1='"+x+"' y1='"+y+"' x2='"+(x+w)+"' y2='"+y+"' stroke='"+c+"' stroke-width='"+sw+"'/>"; }
+        else if (el.type==="fenetre"){ const x=Math.min(el.x1,el.x2),y=Math.min(el.y1,el.y2),w=Math.abs(el.x2-el.x1)||40,h=Math.abs(el.y2-el.y1)||10; inner += "<rect x='"+x+"' y='"+y+"' width='"+w+"' height='"+h+"' fill='none' stroke='"+c+"' stroke-width='"+sw+"'/><line x1='"+x+"' y1='"+(y+h/2)+"' x2='"+(x+w)+"' y2='"+(y+h/2)+"' stroke='"+c+"' stroke-width='"+sw+"'/>"; }
+        else if (el.type==="texte") inner += "<text x='"+el.x1+"' y='"+el.y1+"' font-size='"+(el.fontSize||14)+"' fill='"+c+"' font-family='sans-serif' font-weight='600'>"+esc(el.text)+"</text>";
+      });
+      return "<svg viewBox='0 0 900 600' style='width:100%;display:block;background:#fff'>"+inner+"</svg>";
+    }
+    const posById = {}; (postesTous||[]).forEach(po=>{ posById[po.id]=po; });
+    // Formes par catégorie (mêmes réglages que le plan d'implantation)
+    let posteFormes = { ...POSTE_FORMES_DEFAUT };
+    try { const sf = localStorage.getItem("aads_poste_formes"); if (sf) posteFormes = { ...posteFormes, ...JSON.parse(sf) }; } catch(_e) {}
+    function pastilleFicheHTML(forme, col, label, left, top){
+      const base = "position:absolute;left:"+left+"%;top:"+top+"%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;font-size:6px;font-weight:800;color:#fff;font-family:sans-serif;box-shadow:0 1px 3px rgba(0,0,0,0.5)";
+      if (forme === "triangle"){
+        return "<div style='"+base+";width:17px;height:15px;background:"+col+";-webkit-clip-path:polygon(50% 0,100% 100%,0 100%);clip-path:polygon(50% 0,100% 100%,0 100%);padding-top:5px;box-sizing:border-box'>"+esc(label)+"</div>";
+      }
+      let wh = "width:15px;height:15px;border-radius:50%";
+      if (forme === "carre") wh = "width:14px;height:14px;border-radius:2px";
+      else if (forme === "rect") wh = "width:21px;height:12px;border-radius:2px";
+      else if (forme === "ovale") wh = "width:20px;height:12px;border-radius:50%";
+      return "<div style='"+base+";"+wh+";background:"+col+";border:1.5px solid #fff'>"+esc(label)+"</div>";
+    }
+    const byPlan = {};
+    (positions||[]).forEach(pos=>{ const pid=pos.plan_id; if(!byPlan[pid]) byPlan[pid]=[]; byPlan[pid].push({ id: pos.poste_id||pos.id, x: pos.x, y: pos.y }); });
+    const sections = [];
+    allPlans.forEach(pl=>{
+      const pts = byPlan[pl.id] || [];
+      if (!pts.length) return;
+      const pastilles = pts.map(pt=>{
+        const po = posById[pt.id] || {};
+        const col = couleurPosteSeuil(po, saisiesDate[pt.id], seuilsGlobaux);
+        const forme = posteFormes[categorieForme(po)] || "rond";
+        const left = parseFloat(pt.x)||0, top = parseFloat(pt.y)||0;
+        const label = String(pt.id).slice(0,5);
+        return pastilleFicheHTML(forme, col, label, left, top);
+      }).join("");
+      const fond = pl.img
+        ? "<img src='"+pl.img+"' style='width:100%;display:block'/>"
+        : dessineSvgHTML(pl);
+      sections.push(
+        "<div style='margin-top:10px;break-inside:avoid'>"+
+          "<div style='font-size:12px;font-weight:700;color:#0f2864;margin-bottom:4px'>"+esc(pl.label||"Plan")+"</div>"+
+          "<div style='position:relative;display:block;width:100%;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden'>"+
+            fond+pastilles+
+          "</div>"+
+        "</div>"
+      );
+    });
+    if (!sections.length) return "";
+    const H3 = "font-size:13px;color:#0f2864;border-bottom:1px solid #e5e7eb;padding-bottom:4px;margin:18px 0 8px";
+    return "<div style='"+H3+";page-break-before:always'>Plan d'implantation — état des postes</div>"+
+      "<div style='font-size:11px;color:#374151;margin-bottom:8px'>"+
+        "<span style='display:inline-block;width:11px;height:11px;border-radius:50%;background:#22c55e;vertical-align:middle;margin-right:4px'></span>Sans activité&nbsp;&nbsp;"+
+        "<span style='display:inline-block;width:11px;height:11px;border-radius:50%;background:#f59e0b;vertical-align:middle;margin:0 4px 0 10px'></span>Partielle&nbsp;&nbsp;"+
+        "<span style='display:inline-block;width:11px;height:11px;border-radius:50%;background:#ef4444;vertical-align:middle;margin:0 4px 0 10px'></span>Totale / capture"+
+      "</div>"+
+      sections.join("");
+  } catch(_e){ return ""; }
+}
+
+
+
 // Genere et imprime (PDF navigateur) la fiche d'intervention d'un passage.
-function genererFicheIntervention(p, postesTous, planActions){
+async function genererFicheIntervention(p, postesTous, planActions){
   const esc = t=>String(t==null?"":t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   let saisies = {};
   try { saisies = typeof p.saisies==="string" ? JSON.parse(p.saisies||"{}") : (p.saisies||{}); } catch(_e){ saisies = {}; }
   const posteById = {}; (postesTous||[]).forEach(po=>{ posteById[po.id]=po; });
   const isDeiv = p.type==="Insectes volants";
   const H3 = "font-size:13px;color:#0f2864;border-bottom:1px solid #e5e7eb;padding-bottom:4px;margin:18px 0 8px";
+  // Seuils configurés — pour colorer les états comme l'onglet plan d'implantation
+  let seuilsFiche = {};
+  try { const sr = await sbGet("seuils").catch(()=>[]); if (sr && sr.length && sr[0].data) seuilsFiche = typeof sr[0].data==="string" ? JSON.parse(sr[0].data) : sr[0].data; } catch(_e){ seuilsFiche = {}; }
 
   // Regroupement intérieur / extérieur (postes rongeurs)
   const grp = { int:[], ext:[] };
@@ -1035,7 +1220,9 @@ function genererFicheIntervention(p, postesTous, planActions){
   const triNat=(a,b)=>String(a.id).localeCompare(String(b.id),undefined,{numeric:true});
   grp.int.sort(triNat); grp.ext.sort(triNat);
   const stats=list=>{ const c=list.length; const t=list.filter(x=>_ficheConsomme(x.s)||_ficheCaptures(x.s)>0).length; return {c,t,taux:c>0?Math.round(t/c*100):0}; };
-  const sInt=stats(grp.int), sExt=stats(grp.ext);
+  // Le taux de consommation/activité en haut de fiche ne concerne QUE les rongeurs.
+  const _estRongeur = po => ((po&&po.nuisible)||"Rongeurs")==="Rongeurs" && (!po||po.type!=="DEIV");
+  const sInt=stats(grp.int.filter(x=>_estRongeur(x.po))), sExt=stats(grp.ext.filter(x=>_estRongeur(x.po)));
 
   function carte(titre, st, coul){
     return "<div style='flex:1;min-width:150px;border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px'>"+
@@ -1049,15 +1236,20 @@ function genererFicheIntervention(p, postesTous, planActions){
     const cell = "border:1px solid #e5e7eb;padding:4px 8px";
     const rows = list.map(x=>{
       const s=x.s||{}, po=x.po||{};
-      const cap=_ficheCaptures(s), cons=_ficheConsomme(s);
-      const etat = (s.etat!=null && String(s.etat).trim()!=="") ? esc(s.etat) : "RAS";
-      const el = String(s.etat||"").toLowerCase();
-      const etatColor = cons ? ((el.indexOf("tot")>=0||el.indexOf("100")>=0||el.indexOf("75")>=0)?"#dc2626":"#d97706") : "#16a34a";
+      const cap=_ficheCaptures(s);
+      const estDeiv = po.type==="DEIV" || po.nuisible==="Insectes volants";
+      const ivTot = totalCapturesIV(s);
+      // DEIV : total des insectes capturés (0 au lieu de "RAS"). Autres : état / valeur saisie.
+      const etat = estDeiv ? String(ivTot) : ((s.etat!=null && String(s.etat).trim()!=="") ? esc(s.etat) : "RAS");
+      // Couleur selon les seuils configurés (identique à l'onglet plan d'implantation)
+      const etatColor = couleurPosteSeuil(po, s, seuilsFiche);
       const mol = esc(s.molecule || po.molecule_actuelle || "—");
       return "<tr><td style='"+cell+";font-weight:700;font-family:monospace'>"+esc(x.id)+"</td><td style='"+cell+"'>"+esc(po.zone||"")+"</td><td style='"+cell+"'>"+esc(po.macro||"")+"</td>"+
         "<td style='"+cell+";color:"+etatColor+";font-weight:700'>"+etat+"</td><td style='"+cell+"'>"+mol+"</td><td style='"+cell+";text-align:center'>"+(cap>0?cap:"—")+"</td></tr>";
     }).join("");
-    return "<div style='"+H3+"'>"+titre+" — "+st.t+" touché(s) / "+st.c+" contrôlé(s) · "+st.taux+"% d'activité</div>"+
+    const cTable = list.length;
+    const tTable = list.filter(x=>_ficheConsomme(x.s)||_ficheCaptures(x.s)>0||totalCapturesIV(x.s)>0).length;
+    return "<div style='"+H3+"'>"+titre+" — "+tTable+" avec activité / "+cTable+" contrôlé(s)</div>"+
       "<table style='width:100%;border-collapse:collapse;font-size:11px'><thead><tr>"+
       ["Poste","Zone","Macro-zone","État","Molécule","Captures"].map(h=>"<th style='background:#f1f5f9;border:1px solid #e5e7eb;padding:5px 8px;text-align:left'>"+h+"</th>").join("")+
       "</tr></thead><tbody>"+rows+"</tbody></table>";
@@ -1073,13 +1265,14 @@ function genererFicheIntervention(p, postesTous, planActions){
       ["Appareil","Zone","Insectes capturés"].map(h=>"<th style='background:#f1f5f9;border:1px solid #e5e7eb;padding:5px 8px;text-align:left'>"+h+"</th>").join("")+
       "</tr></thead><tbody>"+rows+"</tbody></table>";
   } else {
-    corps = "<div style='display:flex;gap:12px;flex-wrap:wrap;margin:14px 0'>"+
-        carte("Activité intérieur", sInt, sInt.taux>=50?"#dc2626":sInt.taux>=20?"#d97706":"#16a34a")+
-        carte("Activité extérieur", sExt, sExt.taux>=50?"#dc2626":sExt.taux>=20?"#d97706":"#16a34a")+
+    corps = "<div style='font-size:11px;color:#6b7280;margin:14px 0 4px;font-style:italic'>Taux calculé uniquement sur les postes rongeurs (consommation d'appât / captures).</div>"+
+      "<div style='display:flex;gap:12px;flex-wrap:wrap;margin:0 0 14px'>"+
+        carte("Activité rongeurs — intérieur", sInt, sInt.taux>=50?"#dc2626":sInt.taux>=20?"#d97706":"#16a34a")+
+        carte("Activité rongeurs — extérieur", sExt, sExt.taux>=50?"#dc2626":sExt.taux>=20?"#d97706":"#16a34a")+
         "<div style='flex:1;min-width:150px;border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px'>"+
-          "<div style='font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase'>Postes touchés</div>"+
+          "<div style='font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase'>Postes rongeurs touchés</div>"+
           "<div style='font-size:15px;font-weight:800;color:#0f2864;margin-top:4px'>Int. "+sInt.t+" · Ext. "+sExt.t+"</div>"+
-          "<div style='font-size:11px;color:#374151'>sur "+(sInt.c+sExt.c)+" postes contrôlés</div>"+
+          "<div style='font-size:11px;color:#374151'>sur "+(sInt.c+sExt.c)+" postes rongeurs contrôlés</div>"+
         "</div>"+
       "</div>"+
       tableGroupe("Postes intérieurs", grp.int, sInt)+
@@ -1109,6 +1302,7 @@ function genererFicheIntervention(p, postesTous, planActions){
   "</div>";
 
   const typeLabel = isDeiv ? "Passage DEIV (insectes volants)" : ("Contrôle périodique"+(p.type&&p.type!=="Rongeurs"?" — "+esc(p.type):""));
+  const planHtml = await construirePlanFiche(p, postesTous, saisies);
   const body =
     "<h1 style='font-size:20px;color:#0f2864;margin:0 0 6px'>Fiche d'intervention</h1>"+
     "<div style='display:flex;gap:22px;flex-wrap:wrap;font-size:12px;color:#374151;margin-bottom:6px'>"+
@@ -1120,6 +1314,7 @@ function genererFicheIntervention(p, postesTous, planActions){
     corps+
     "<div style='"+H3+"'>Notes du passage</div>"+notesHtml+
     "<div style='"+H3+"'>Recommandations du jour</div>"+recosHtml+
+    planHtml+
     signatureHtml;
   exportHTML("Fiche intervention "+esc(p.date)+(p.site?" - "+esc(p.site):""), body);
 }
@@ -4050,7 +4245,7 @@ function TauxActiviteChart({ passages, postes }) {
 
   function filterPassagesByPeriode(list, anneeOverride) {
     return list.filter(p => {
-      if (p.type === "Insectes volants") return false; // exclure les passages DEIV
+      if (estPassageDeiv(p)) return false; // exclure les passages DEIV
       const d = pd(p.date);
       if (!d) return false;
       if (anneeOverride) {
@@ -4442,7 +4637,7 @@ function CapturesChart({ passages, postes }) {
 
   function filterPassagesByPeriode(list, anneeOverride) {
     return list.filter(p => {
-      if (p.type === "Insectes volants") return false;
+      if (estPassageDeiv(p)) return false;
       const d = pd(p.date);
       if (!d) return false;
       if (anneeOverride) {
@@ -4692,7 +4887,7 @@ function PostesTouchesChart({ passages, postes }) {
 
   function filterPassagesByPeriode(list, anneeOverride) {
     return list.filter(p => {
-      if (p.type === "Insectes volants") return false;
+      if (estPassageDeiv(p)) return false;
       const d = pd(p.date);
       if (!d) return false;
       if (anneeOverride) {
@@ -4963,7 +5158,7 @@ function DeivEvolutionStandaloneChart({ passages, postes }) {
   const allowedDeivSet = _deivFilterActive ? new Set(postes.filter(p => p.type==="DEIV"
       && (produitNuFilter==="tous" || (produitNuFilter==="oui" ? !!p.produit_nu : !p.produit_nu))
       && (natureFilter==="toutes" || (p.nature||"")===natureFilter)).map(p=>p.id)) : null;
-  const [filterAnnee, setFilterAnnee] = usePersistedValue("DeivEvolution_filterAnnee", anneeDefaut(passages.filter(p=>p.type==="Insectes volants")));
+  const [filterAnnee, setFilterAnnee] = usePersistedValue("DeivEvolution_filterAnnee", anneeDefaut(passages.filter(estPassageDeiv)));
   const [selectedAnnees, setSelectedAnnees] = usePersistedValue("DeivEvolution_selectedAnnees", []);
   const [filterTrimestre, setFilterTrimestre] = usePersistedValue("DeivEvolution_filterTrimestre", "Tous");
   const [filterMois, setFilterMois] = usePersistedValue("DeivEvolution_filterMois", "Tous");
@@ -4989,7 +5184,7 @@ function DeivEvolutionStandaloneChart({ passages, postes }) {
   const MOIS_LABELS = ["Jan.","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Dec"];
 
   // Ne garder QUE les passages DEIV
-  const passagesDeiv = passages.filter(p => p.type === "Insectes volants");
+  const passagesDeiv = passages.filter(estPassageDeiv);
 
   const annees = [...new Set(passagesDeiv.map(p=>{ const d=pd(p.date); return d&&!isNaN(d)?d.getFullYear():null; }).filter(Boolean))].sort((a,b)=>a-b);
 
@@ -5275,7 +5470,7 @@ function DeivEvolutionStandaloneChart({ passages, postes }) {
 
 function DeivParAppareilChart({ passages, postes }) {
   const [selectedDeiv, setSelectedDeiv] = usePersistedValue("DeivParAppareil_selectedDeiv", "");
-  const [filterAnnee, setFilterAnnee] = usePersistedValue("DeivParAppareil_filterAnnee", anneeDefaut(passages.filter(p=>p.type==="Insectes volants")));
+  const [filterAnnee, setFilterAnnee] = usePersistedValue("DeivParAppareil_filterAnnee", anneeDefaut(passages.filter(estPassageDeiv)));
   const [selectedAnnees, setSelectedAnnees] = usePersistedValue("DeivParAppareil_selectedAnnees", []);
   const [filterTrimestre, setFilterTrimestre] = usePersistedValue("DeivParAppareil_filterTrimestre", "Tous");
   const [filterMois, setFilterMois] = usePersistedValue("DeivParAppareil_filterMois", "Tous");
@@ -5327,7 +5522,7 @@ function DeivParAppareilChart({ passages, postes }) {
     return na - nb;
   });
 
-  const passagesDeiv = passages.filter(p => p.type === "Insectes volants");
+  const passagesDeiv = passages.filter(estPassageDeiv);
   const annees = [...new Set(passagesDeiv.map(p=>{ const d=pd(p.date); return d&&!isNaN(d)?d.getFullYear():null; }).filter(Boolean))].sort((a,b)=>a-b);
 
   function filterPassagesByPeriode(list, anneeOverride) {
@@ -5937,7 +6132,7 @@ function ToxiquePlaceboChart({ passages, postes }) {
 
   function buildStats(anneeFilter) {
     const passagesFiltres = passages.filter(p=>{
-      if (p.type==="Insectes volants") return false;
+      if (estPassageDeiv(p)) return false;
       const d=pd(p.date); if(!d||isNaN(d)) return false;
       if (anneeFilter && d.getFullYear()!==parseInt(anneeFilter)) return false;
       if (!anneeFilter && selectedAnnees.length>0 && !selectedAnnees.includes(d.getFullYear())) return false;
@@ -6110,7 +6305,7 @@ function MoleculesChart({ passages, postes }) {
 
   function filterPassages(list) {
     return list.filter(p=>{
-      if (p.type==="Insectes volants") return false;
+      if (estPassageDeiv(p)) return false;
       const d = pd(p.date); if (!d) return false;
       if (selectedAnnees.length>0) return selectedAnnees.includes(d.getFullYear());
       if (filterAnnee!=="Toutes") return d.getFullYear()===parseInt(filterAnnee);
